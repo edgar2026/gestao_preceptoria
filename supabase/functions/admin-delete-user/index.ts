@@ -188,6 +188,8 @@ Deno.serve(async (req) => {
         email: targetProfile.email,
         nome_completo: targetProfile.nome_completo,
       }),
+      audit_profile_nome: targetProfile.nome_completo,
+      audit_profile_email: targetProfile.email,
       profile_id: profile.id,
     });
 
