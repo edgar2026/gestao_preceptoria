@@ -35,7 +35,7 @@ import{
     inativarProfissao,inativarDisciplina,inativarLocal,inativarSetor,inativarRegistro,
     fetchVinculosLocaisParaEscalas,fetchVinculosParaEscalasPage,fetchEscalasPorVinculo,salvarEscala,inativarEscala,reativarEscala,
     fetchPresencas,fetchPreceptoresComEscalaNoDia,registrarPresencaCoordenador,corrigirPresencaAdministrativa,fetchPresencasConsolidadas,fetchFolhaPresenca,fetchCalendarioPresencas,fetchAjustes,fetchConfiguracoes,fetchAuditLogs,
-    fetchUsuarios,atualizarUsuario,criarUsuarioViaEdge,bloquearUsuario,inativarReativarUsuario,redefinirAcessoUsuario,redefinirAcessoViaEdge,marcarPrimeiroAcessoConcluido,atualizarDadosUsuario,enviarRecuperacaoSenha,
+    fetchUsuarios,atualizarUsuario,criarUsuarioViaEdge,bloquearUsuario,inativarReativarUsuario,redefinirAcessoUsuario,redefinirAcessoViaEdge,deletarUsuarioViaEdge,marcarPrimeiroAcessoConcluido,atualizarDadosUsuario,enviarRecuperacaoSenha,
     fetchRegrasFinanceiras,salvarRegraFinanceira,inativarRegraFinanceira,reativarRegraFinanceira,checarConflitoRegraFinanceira,
     fetchPreceptoresPraticaParaRegras,fetchPreceptoresInternatoParaRegras,
     fetchInternatos,insertInternato,updateInternato,deleteInternato,inativarInternato,checkInternatoDependencies,
@@ -2831,10 +2831,10 @@ export default function App({forceLogin=false}){
             catch(e){notify("Erro: "+e.message,"error");}
           }} title={r.ativo?"Bloquear":"Desbloquear"}>{r.ativo?<ShieldOff size={16}/>:<Shield size={16}/>}</button>}
           {!isSelf&&r.ativo&&<button onClick={async()=>{
-            if(!await systemConfirm(`O usuario ${r.nome_completo} sera desativado e arquivado, sem perda do historico.\n\nNenhum acesso, escala, presenca ou calculo futuro sera permitido. Registros existentes serao preservados.`,"Arquivar usuario",{danger:true,confirmLabel:"Arquivar usuario"}))return;
-            try{await inativarReativarUsuario(r.profile_id,true,"Arquivado pelo administrador");notify("Usuario arquivado com sucesso!");loadPage();}
+            if(!await systemConfirm(`Esta acao removera definitivamente o usuario "${r.nome_completo}" (${r.email}) do sistema e nao podera ser desfeita.\n\nTodos os acessos e permissoes serao revogados imediatamente.`,"Deletar usuario",{danger:true,confirmLabel:"Deletar definitivamente",busyLabel:"Excluindo usuario..."}))return;
+            try{await deletarUsuarioViaEdge(r.profile_id);notify("Usuario deletado com sucesso!");loadPage();}
             catch(e){notify("Erro: "+e.message,"error");}
-          }} title="Excluir usuario"><Trash2 size={16}/></button>}
+          }} title="Deletar usuario"><Trash2 size={16}/></button>}
           {!isSelf&&!r.ativo&&<button onClick={async()=>{
             if(!await systemConfirm(`Reativar o usuario ${r.nome_completo}? O usuario voltara a aparecer na lista ativa.`,"Reativar usuario"))return;
             try{await inativarReativarUsuario(r.profile_id,false);notify("Usuario reativado com sucesso!");loadPage();}

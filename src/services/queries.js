@@ -1426,6 +1426,38 @@ export async function atualizarDadosUsuario(profileId, nome, email, telefone) {
   return data;
 }
 
+export async function deletarUsuarioViaEdge(profileId) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Sessao invalida. Faca login novamente.');
+  let res;
+  try {
+    res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-delete-user`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ profile_id: profileId }),
+    });
+  } catch (fetchErr) {
+    throw new Error('Falha ao conectar com o servidor. Verifique sua conexao e tente novamente.');
+  }
+  let json;
+  try {
+    json = await res.json();
+  } catch (parseErr) {
+    throw new Error('Resposta invalida do servidor (status ' + res.status + ')');
+  }
+  if (!res.ok) {
+    if (json.dependencies && Array.isArray(json.dependencies)) {
+      throw new Error(json.error + ': ' + json.dependencies.join('; '));
+    }
+    throw new Error(json.error || json.msg || 'Erro ao excluir usuario (status ' + res.status + ')');
+  }
+  return json;
+}
+
 export async function enviarRecuperacaoSenha(email) {
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
     redirectTo: `${window.location.origin}/redefinir-senha`,
