@@ -35,7 +35,7 @@ import{
     inativarProfissao,inativarDisciplina,inativarLocal,inativarSetor,inativarRegistro,
     fetchVinculosLocaisParaEscalas,fetchVinculosParaEscalasPage,fetchEscalasPorVinculo,salvarEscala,inativarEscala,reativarEscala,
     fetchPresencas,fetchPreceptoresComEscalaNoDia,registrarPresencaCoordenador,corrigirPresencaAdministrativa,fetchPresencasConsolidadas,fetchFolhaPresenca,fetchCalendarioPresencas,fetchAjustes,fetchConfiguracoes,fetchAuditLogs,
-    fetchUsuarios,atualizarUsuario,criarUsuarioViaEdge,bloquearUsuario,inativarReativarUsuario,redefinirAcessoUsuario,marcarPrimeiroAcessoConcluido,atualizarDadosUsuario,enviarRecuperacaoSenha,
+    fetchUsuarios,atualizarUsuario,criarUsuarioViaEdge,bloquearUsuario,inativarReativarUsuario,redefinirAcessoUsuario,redefinirAcessoViaEdge,marcarPrimeiroAcessoConcluido,atualizarDadosUsuario,enviarRecuperacaoSenha,
     fetchRegrasFinanceiras,salvarRegraFinanceira,inativarRegraFinanceira,reativarRegraFinanceira,checarConflitoRegraFinanceira,
     fetchPreceptoresPraticaParaRegras,fetchPreceptoresInternatoParaRegras,
     fetchInternatos,insertInternato,updateInternato,deleteInternato,inativarInternato,checkInternatoDependencies,
@@ -237,17 +237,17 @@ function PrimeiroAcessoScreen({onComplete}){
     <div className="login-card" style={{maxWidth:460}}>
       <Logo variant="completa"/>
       <h2>Crie sua nova senha</h2>
-      <p style={{color:"var(--text-soft)",marginBottom:20}}>Por segurança, você deve alterar sua senha temporária antes de acessar o sistema.</p>
+      <p style={{color:"var(--text-soft)",marginBottom:20}}>Por seguranca, voce deve alterar sua senha temporaria antes de acessar o sistema.</p>
       <form onSubmit={handle}>
-        <label><b>Nova senha</b><input type="password" value={novaSenha} onChange={e=>setNovaSenha(e.target.value)} placeholder="Mínimo 8 caracteres" required autoFocus/></label>
+        <label><b>Nova senha</b><input type="password" value={novaSenha} onChange={e=>setNovaSenha(e.target.value)} placeholder="Minimo 8 caracteres" required autoFocus/></label>
         <label><b>Confirmar senha</b><input type="password" value={confirmarSenha} onChange={e=>setConfirmarSenha(e.target.value)} placeholder="Repita a nova senha" required/></label>
         {novaSenha.length>0&&<div className="pw-rules">
           {[
             [novaSenha.length>=8,`${novaSenha.length}/8 caracteres`],
-            [/[A-Z]/.test(novaSenha),"Uma letra maiúscula"],
-            [/[a-z]/.test(novaSenha),"Uma letra minúscula"],
-            [/[0-9]/.test(novaSenha),"Um número"],
-            [/[^A-Za-z0-9]/.test(novaSenha),"Um símbolo"],
+            [/[A-Z]/.test(novaSenha),"Uma letra maiuscula"],
+            [/[a-z]/.test(novaSenha),"Uma letra minuscula"],
+            [/[0-9]/.test(novaSenha),"Um numero"],
+            [/[^A-Za-z0-9]/.test(novaSenha),"Um simbolo"],
             [novaSenha!=="ser@2026","Diferente de ser@2026"],
             [novaSenha===confirmarSenha&&confirmarSenha.length>0,"Senhas coincidem"],
           ].map(([ok,text])=><span key={text} className={ok?"ok":"bad"}><Check size={12}/> {text}</span>)}
@@ -255,6 +255,7 @@ function PrimeiroAcessoScreen({onComplete}){
         {erro&&<div className="login-erro"><AlertCircle size={14}/> {erro}</div>}
         <button className="btn" type="submit" disabled={carregando||!senhaValida}>{carregando?<Loader2 size={16} className="spin"/>:<><Check size={16}/></>} Atualizar senha</button>
       </form>
+      <a href="/login" className="auth-forgot-link" onClick={async(e)=>{e.preventDefault();await supabase.auth.signOut();window.location.href="/login";}}>Sair</a>
     </div>
   </div>;
 }
@@ -2829,14 +2830,19 @@ export default function App({forceLogin=false}){
             try{await bloquearUsuario(r.profile_id,r.ativo);notify(r.ativo?"Usuário bloqueado!":"Usuário desbloqueado!");loadPage();}
             catch(e){notify("Erro: "+e.message,"error");}
           }} title={r.ativo?"Bloquear":"Desbloquear"}>{r.ativo?<ShieldOff size={16}/>:<Shield size={16}/>}</button>}
-          {!isSelf&&<button onClick={async()=>{
-            if(!await systemConfirm(r.ativo?`Inativar ${r.nome_completo}?`:`Reativar ${r.nome_completo}?`,"Inativar/Reativar usuário",{danger:r.ativo}))return;
-            try{await inativarReativarUsuario(r.profile_id,r.ativo);notify(r.ativo?"Usuário inativado!":"Usuário reativado!");loadPage();}
+          {!isSelf&&r.ativo&&<button onClick={async()=>{
+            if(!await systemConfirm(`O usuario ${r.nome_completo} sera desativado e arquivado, sem perda do historico.\n\nNenhum acesso, escala, presenca ou calculo futuro sera permitido. Registros existentes serao preservados.`,"Arquivar usuario",{danger:true,confirmLabel:"Arquivar usuario"}))return;
+            try{await inativarReativarUsuario(r.profile_id,true,"Arquivado pelo administrador");notify("Usuario arquivado com sucesso!");loadPage();}
             catch(e){notify("Erro: "+e.message,"error");}
-          }} title={r.ativo?"Inativar":"Reativar"}>{r.ativo?<Trash2 size={16}/>:<RotateCw size={16}/>}</button>}
+          }} title="Excluir usuario"><Trash2 size={16}/></button>}
+          {!isSelf&&!r.ativo&&<button onClick={async()=>{
+            if(!await systemConfirm(`Reativar o usuario ${r.nome_completo}? O usuario voltara a aparecer na lista ativa.`,"Reativar usuario"))return;
+            try{await inativarReativarUsuario(r.profile_id,false);notify("Usuario reativado com sucesso!");loadPage();}
+            catch(e){notify("Erro: "+e.message,"error");}
+          }} title="Reativar"><RotateCw size={16}/></button>}
           {!isSelf&&<button onClick={async()=>{
-            if(!await systemConfirm(`Redefinir acesso de ${r.nome_completo}?\nO usuário precisará criar uma nova senha no próximo login.`,"Redefinir acesso",{danger:true}))return;
-            try{await redefinirAcessoUsuario(r.profile_id);notify("Acesso redefinido! Senha temporária: ser@2026");loadPage();}
+            if(!await systemConfirm(`Redefinir acesso de ${r.nome_completo}?\nO usuario precisara criar uma nova senha no proximo login.`,"Redefinir acesso",{danger:true}))return;
+            try{await redefinirAcessoViaEdge(r.profile_id);notify("Acesso redefinido! Senha temporaria: ser@2026");loadPage();}
             catch(e){notify("Erro: "+e.message,"error");}
           }} title="Redefinir acesso"><RotateCw size={16}/></button>}
         </span></td>

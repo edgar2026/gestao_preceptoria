@@ -1380,6 +1380,33 @@ export async function redefinirAcessoUsuario(profileId) {
   return data;
 }
 
+export async function redefinirAcessoViaEdge(profileId) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Sessao invalida. Faca login novamente.');
+  let res;
+  try {
+    res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-reset-access`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ profile_id: profileId }),
+    });
+  } catch (fetchErr) {
+    throw new Error('Falha ao conectar com o servidor. Verifique sua conexao e tente novamente.');
+  }
+  let json;
+  try {
+    json = await res.json();
+  } catch (parseErr) {
+    throw new Error('Resposta invalida do servidor (status ' + res.status + ')');
+  }
+  if (!res.ok) throw new Error(json.error || json.msg || 'Erro ao redefinir acesso (status ' + res.status + ')');
+  return json;
+}
+
 export async function marcarPrimeiroAcessoConcluido(profileId) {
   const { data, error } = await supabase.rpc('marcar_primeiro_acesso_concluido', {
     p_profile_id: profileId,
