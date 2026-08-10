@@ -1,0 +1,37 @@
+# .gitignore — Sistema de Gestão de Preceptoria
+
+# Ambiente e segredos
+.env
+.env.*
+!.env.example
+supabase/.env
+supabase/env
+
+# Documentos privados (regras financeiras, diagnósticos, dados sensíveis)
+docs/private/
+
+# Build
+dist/
+build/
+
+# Dependências
+node_modules/
+
+# Supabase local
+supabase/.branches
+supabase/.temp
+
+# Logs e temporários
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.vscode/settings.json
+*.swp
+*.swo
+*.bak
+
+# OS
+.DS_Store
+Thumbs.db
