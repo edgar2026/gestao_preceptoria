@@ -14,6 +14,9 @@ if ('serviceWorker' in navigator) {
 }
 
 const normalizedPath = window.location.pathname.replace(/\/$/, '') || '/';
+const hash = window.location.hash;
+const isPasswordRecovery = hash.includes('type=recovery');
+
 let Component = App;
 let componentProps = {};
 
@@ -21,7 +24,7 @@ if (normalizedPath === '/login') {
   Component = (props) => <App forceLogin {...props} />;
 } else if (normalizedPath === '/recuperar-senha') {
   Component = RecuperarSenha;
-} else if (normalizedPath === '/redefinir-senha') {
+} else if (normalizedPath === '/redefinir-senha' || isPasswordRecovery) {
   Component = RedefinirSenha;
 } else if (normalizedPath === '/preceptor/presenca') {
   Component = RegistrarPresencasPage;
