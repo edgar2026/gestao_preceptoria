@@ -75,8 +75,9 @@ export default function RegistroPresencaToken(){
       carregarDados();
     }
     if(falhas.length>0){
-      const erros=falhas.map(r=>r.data?.erro||"Erro desconhecido").join("; ");
-      setMensagem(`Erro: ${erros}`);
+      const ehConflito=falhas.some(r=>/^Conflito de escala/i.test(String(r.data?.erro||"").trim()));
+      const erros=falhas.map(r=>r.data?.erro||"Erro desconhecido").join("\n\n");
+      setMensagem(ehConflito?erros:`Erro: ${erros}`);
     }
     setEnviando(false);
   },[turnoSel,escalasFiltradas,token,enviando,carregarDados]);
@@ -123,7 +124,7 @@ export default function RegistroPresencaToken(){
         </>}
         {selecionada&&locaisNoTurno.length>1&&<button className="token-back" onClick={()=>setSelecionada(null)}>← Trocar local</button>}
       </>}
-      {mensagem&&<div className={`token-msg${mensagem.includes("Erro")?" bad":""}`}>{mensagem}</div>}
+      {mensagem&&<div className={`token-msg${(mensagem.includes("Erro")||mensagem.startsWith("Conflito"))?" bad":""}`}>{mensagem}</div>}
     </section>
   </div></main>
 }

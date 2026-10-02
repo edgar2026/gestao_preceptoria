@@ -8,11 +8,18 @@ supabase/.env
 supabase/env
 
 # Documentos privados (regras financeiras, diagnósticos, dados sensíveis)
+private/
 docs/private/
 
-# Build
+# Planilhas e bases de importação
+*.xlsx
+*.xls
+*.csv
+
+# Build e cobertura
 dist/
 build/
+coverage/
 
 # Dependências
 node_modules/
@@ -30,7 +37,17 @@ pnpm-debug.log*
 .vscode/settings.json
 *.swp
 *.swo
-*.bak
+*.bak*
+*.backup
+*.dump
+*.sql.gz
+
+# Relatórios de prévia/diagnóstico/importação e áreas de trabalho temporárias
+PREVIA_*.md
+RESULTADO_*.md
+PLANO_IMPORTACAO_*.md
+MAPA_CONFLITOS_*.md
+scratch/
 
 # OS
 .DS_Store

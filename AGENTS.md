@@ -1,6 +1,6 @@
 # Instruções para agentes de desenvolvimento
 
-1. Leia `docs/DOCUMENTACAO_VIVA_PLANILHAS_PRECEPTORIA.md` antes de alterar regras.
+1. Leia `DOCUMENTACAO_OFICIAL_SISTEMA_PRECEPTORIA.md` antes de alterar regras.
 2. Não remova RLS, auditoria, vigências ou memória de cálculo.
 3. A rota do preceptor deve continuar mobile-first e exibir apenas presença.
 4. O painel administrativo é desktop-first.

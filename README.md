@@ -100,8 +100,7 @@ npm run build
 
 ## 📚 Documentação
 
-- `docs/DOCUMENTACAO_COMPLETA_SISTEMA.md` - Documentação técnica completa
-- `docs/DOCUMENTACAO_VIVA_PLANILHAS_PRECEPTORIA.md` - Levantamento de requisitos
+- `DOCUMENTACAO_OFICIAL_SISTEMA_PRECEPTORIA.md` - Documentação oficial consolidada
 - `AGENTS.md` - Instruções para agentes de desenvolvimento
 
 ## 🎯 Seed Inicial

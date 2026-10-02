@@ -1,1 +1,4 @@
-import{createClient}from'@supabase/supabase-js';export const supabase=createClient(import.meta.env.VITE_SUPABASE_URL,import.meta.env.VITE_SUPABASE_ANON_KEY);
+import { createClient } from '@supabase/supabase-js';
+const url = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) || process.env.VITE_SUPABASE_URL || 'https://tdmrscavrdoekrzdlmpf.supabase.co';
+const key = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY) || process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRkbXJzY2F2cmRvZWtyemRsbXBmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU1MTg0MDAsImV4cCI6MjEwMTA5NDQwMH0.9DkOkjgO8qCg-jC_36x7SVCYGL6wXBZwn23kWAdLKFs';
+export const supabase = createClient(url, key);

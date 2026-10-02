@@ -1,4 +1,4 @@
-import { supabase } from '../supabase';
+import { supabase } from '../supabase.js';
 
 // ── Preceptores ──
 export async function fetchPreceptores() {
@@ -52,6 +52,51 @@ export async function fetchVinculosInternato(preceptorId) {
   return data || [];
 }
 
+export async function fetchVinculosInternatoPorPreceptor(preceptorId) {
+  if (!preceptorId) return [];
+  const { data, error } = await supabase
+    .from('vinculos_internato')
+    .select(`
+      *,
+      preceptor:preceptores!vinculos_internato_preceptor_id_fkey(id, status, nome_completo, unidade_id, profissao_id),
+      semestre:semestres(codigo, data_inicio, data_fim),
+      internato:internatos(nome, numero),
+      periodo:periodos(numero, nome),
+      local:locais(id, nome),
+      setor:setores(id, nome),
+      unidade:unidades(id, nome),
+      modalidade_ref:modalidades_pagamento(id, nome),
+      vinculo_regras:vinculo_regras_financeiras(
+        id, regra_id, status, data_inicio, data_fim, justificativa, encerrado_justificativa, created_at,
+        regra:regras_financeiras(
+          id, nome, tipo_atuacao, forma_calculo, status,
+          componentes:regra_componentes(id, descricao, tipo, valor, valor_extra, quantidade_minima, exige_presenca, status)
+        )
+      ),
+      coordenadores:vinculo_coordenadores!vinculo_coordenadores_vinculo_internato_id_fkey(
+        id, profile_id, status,
+        profiles!vinculo_coordenadores_profile_id_fkey(id, nome_completo, email)
+      )
+    `)
+    .eq('preceptor_id', preceptorId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data || []).map(v => {
+    const coordenadoresAtivos = (v.coordenadores || [])
+      .filter(c => c.status === 'ativo')
+      .map(c => ({ profile_id: c.profile_id, nome_completo: c.profiles?.nome_completo, email: c.profiles?.email }));
+    const vComCoordenadores = { ...v, coordenadores: coordenadoresAtivos };
+    const camposFaltantes = getVinculoCamposFaltantes(vComCoordenadores, 'internato');
+    const completo = camposFaltantes.length === 0;
+    return {
+      ...vComCoordenadores,
+      vinculo_completo: completo,
+      vinculo_campos_faltantes: completo ? [] : camposFaltantes,
+      regraAtiva: getRegraAtiva(v)
+    };
+  });
+}
+
 const PRECEPTOR_REF_SELECT = `
   *,
   unidade:unidades!preceptores_unidade_id_fkey(id, nome),
@@ -70,7 +115,7 @@ function mapPreceptorPratica(v) {
     disciplina: v.disciplina?.nome || "-",
     periodo: v.periodo?.numero ? `${v.periodo.numero}º período` : "Não informado",
     local: v.local?.nome || "-",
-    valor_inicial: v.preceptor?.valor_inicial ?? null,
+    valor_inicial: v.valor_inicial ?? null,
     vinculo_adm: v,
     vinculo_status: v.status || "-",
     vinculo_completo: completo,
@@ -79,9 +124,60 @@ function mapPreceptorPratica(v) {
   };
 }
 
+function mapVinculoCompleto(v) {
+  const completo = isVinculoCompleto(v, 'internato');
+  const camposFaltantes = completo ? [] : getVinculoCamposFaltantes(v, 'internato');
+  const coordenadoresAtivos = (v.coordenadores || [])
+    .filter(c => c.status === 'ativo')
+    .map(c => ({ profile_id: c.profile_id, nome_completo: c.profiles?.nome_completo, email: c.profiles?.email }));
+  return {
+    ...v,
+    coordenadores: coordenadoresAtivos,
+    vinculo_completo: completo,
+    vinculo_campos_faltantes: camposFaltantes,
+    regraAtiva: getRegraAtiva(v)
+  };
+}
+
+function mapPreceptorInternatoFromGroup(preceptorRef, vinculos) {
+  const mappedVinculos = vinculos.map(mapVinculoCompleto);
+  const vinculosCompletos = mappedVinculos.filter(v => v.vinculo_completo).length;
+  const vinculosTotal = mappedVinculos.length;
+  const todosInativos = mappedVinculos.every(v => v.status !== 'ativo');
+  const regraAtiva = mappedVinculos.find(v => v.regraAtiva)?.regraAtiva || null;
+  const dadosGeraisCompletos = isDadosGeraisCompleto(preceptorRef, preceptorRef?.modalidade_ref?.nome);
+  return {
+    ...preceptorRef,
+    unidade: preceptorRef?.unidade?.nome || "-",
+    profissao: preceptorRef?.profissao_ref?.nome || "-",
+    modalidade: preceptorRef?.modalidade_ref?.nome || "-",
+    valor_inicial: mappedVinculos.reduce((sum, v) => sum + Number(v.valor_inicial || 0), 0) || null,
+    vinculos_internato: mappedVinculos,
+    vinculos_quantidade: vinculosTotal,
+    vinculos_completos: vinculosCompletos,
+    vinculo_internato: mappedVinculos[0] || null,
+    vinculo_status: todosInativos ? "inativo" : (mappedVinculos[0]?.status || "-"),
+    vinculo_completo: vinculosCompletos === vinculosTotal && vinculosTotal > 0,
+    vinculo_campos_faltantes: vinculosCompletos < vinculosTotal
+      ? mappedVinculos.filter(v => !v.vinculo_completo).reduce((acc, v) => {
+          v.vinculo_campos_faltantes.forEach(c => { if (!acc.includes(c)) acc.push(c); });
+          return acc;
+        }, [])
+      : [],
+    dadosGeraisCompletos,
+    regraAtiva,
+    modalidade_pagamento_id: preceptorRef?.modalidade_pagamento_id || null,
+    cnpj: preceptorRef?.cnpj || null,
+    razao_social: preceptorRef?.razao_social || null
+  };
+}
+
 function mapPreceptorInternato(v) {
   const completo = isVinculoCompleto(v, 'internato');
   const camposFaltantes = completo ? [] : getVinculoCamposFaltantes(v, 'internato');
+  const coordenadoresAtivos = (v.coordenadores || [])
+    .filter(c => c.status === 'ativo')
+    .map(c => ({ profile_id: c.profile_id, nome_completo: c.profiles?.nome_completo, email: c.profiles?.email }));
   return {
     ...v.preceptor,
     unidade: v.preceptor?.unidade?.nome || "-",
@@ -90,12 +186,16 @@ function mapPreceptorInternato(v) {
     internato: v.internato?.nome || "-",
     periodo: v.periodo?.numero ? `${v.periodo.numero}º período` : "Não informado",
     local: v.local?.nome || "-",
-    valor_inicial: v.preceptor?.valor_inicial ?? null,
+    valor_inicial: v.valor_inicial ?? null,
     vinculo_internato: v,
     vinculo_status: v.status || "-",
     vinculo_completo: completo,
     vinculo_campos_faltantes: camposFaltantes,
-    regraAtiva: getRegraAtiva(v)
+    regraAtiva: getRegraAtiva(v),
+    coordenadores: coordenadoresAtivos,
+    modalidade_pagamento_id: v.modalidade_pagamento_id || v.preceptor?.modalidade_pagamento_id || null,
+    cnpj: v.cnpj || v.preceptor?.cnpj || null,
+    razao_social: v.razao_social || v.preceptor?.razao_social || null
   };
 }
 
@@ -130,11 +230,21 @@ export async function fetchPreceptoresInternato() {
       local:locais(id, nome),
       setor:setores(id, nome),
       unidade:unidades(id, nome),
-      vinculo_regras:vinculo_regras_financeiras(${VINCULO_REGRA_EMBED})
+      vinculo_regras:vinculo_regras_financeiras(${VINCULO_REGRA_EMBED}),
+      coordenadores:vinculo_coordenadores!vinculo_coordenadores_vinculo_internato_id_fkey(
+        id, profile_id, status,
+        profiles!vinculo_coordenadores_profile_id_fkey(id, nome_completo, email)
+      )
     `)
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return (data || []).map(mapPreceptorInternato);
+  const porPreceptor = {};
+  (data || []).forEach(v => {
+    const pid = v.preceptor_id;
+    if (!porPreceptor[pid]) porPreceptor[pid] = { preceptor: v.preceptor, vinculos: [] };
+    porPreceptor[pid].vinculos.push(v);
+  });
+  return Object.values(porPreceptor).map(g => mapPreceptorInternatoFromGroup(g.preceptor, g.vinculos));
 }
 
 export async function buscarPreceptorPorCpf(cpf, excludeId = null) {
@@ -213,6 +323,183 @@ export async function updatePreceptor(id, dados) {
   return data;
 }
 
+// ── E-mails para cópia do cadastro principal do preceptor ──
+// Pertencem ao cadastro (não ao vínculo). O e-mail principal
+// permanece em preceptores.email, sem migração de dados.
+
+const EMAIL_COPIA_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+export function normalizarEmailCopia(valor) {
+  return String(valor == null ? '' : valor).trim();
+}
+
+export function validarEmailsCopia(lista, emailPrincipal) {
+  const principal = normalizarEmailCopia(emailPrincipal).toLowerCase();
+  const vistos = new Set();
+  for (const item of (lista || [])) {
+    const email = normalizarEmailCopia(item?.email);
+    if (!email) return 'Há um e-mail para cópia vazio. Preencha o endereço ou remova a linha.';
+    if (!EMAIL_COPIA_RE.test(email)) {
+      return `E-mail para cópia inválido: "${email}". Verifique o endereço informado.`;
+    }
+    const chave = email.toLowerCase();
+    if (principal && chave === principal) {
+      return `O e-mail "${email}" já é o e-mail principal do preceptor e não pode ser repetido como e-mail para cópia.`;
+    }
+    if (vistos.has(chave)) {
+      return `E-mail para cópia duplicado: "${email}". Informe endereços diferentes.`;
+    }
+    vistos.add(chave);
+  }
+  return null;
+}
+
+// Monta os destinatários do Outlook Web a cada preparação, usando o
+// cadastro principal ATUAL do preceptor (sem estado local antigo).
+//   Para: somente o e-mail principal atual.
+//   Cc: somente adicionais ATIVOS, na ordem cadastrada, sem vazios,
+//       sem duplicidade e sem repetir o endereço principal.
+export function montarDestinatariosOutlook(emailPrincipal, listaCopia) {
+  const para = normalizarEmailCopia(emailPrincipal);
+  if (!para) return { erro: 'principal_vazio' };
+  if (!EMAIL_COPIA_RE.test(para)) return { erro: 'principal_invalido', email: para };
+
+  const cc = [];
+  const vistos = new Set([para.toLowerCase()]);
+  for (const item of (listaCopia || [])) {
+    if (!item || item.ativo === false) continue;
+    const email = normalizarEmailCopia(item?.email);
+    if (!email) continue;
+    if (!EMAIL_COPIA_RE.test(email)) return { erro: 'copia_invalido', email };
+    const chave = email.toLowerCase();
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    cc.push(email);
+  }
+  return { para, cc };
+}
+
+function codificarEnderecoMailto(endereco) {
+  return String(endereco == null ? '' : endereco).split('@').map(encodeURIComponent).join('@');
+}
+
+// Deep link do Outlook Web.
+// - Parâmetros diretos (to/cc/subject/body): formato já usado pela integração.
+// - Parâmetro "mailtouri": URI mailto completo (RFC 6068), único formato que
+//   carrega o Cc na integração atual do Outlook Web.
+// Os dois são enviados: os diretos garantem Para/Assunto/Corpo e o mailtouri
+// garante o Cc. O conteúdo do corpo não é alterado.
+export function montarUrlOutlook({ para, cc = [], assunto = '', corpo = '' }) {
+  const hfields = [];
+  if (cc.length > 0) hfields.push(`cc=${cc.map(codificarEnderecoMailto).join(',')}`);
+  hfields.push(`subject=${encodeURIComponent(assunto)}`);
+  hfields.push(`body=${encodeURIComponent(corpo)}`);
+  const mailtoUri = `mailto:${codificarEnderecoMailto(para)}?${hfields.join('&')}`;
+
+  const diretos = `to=${encodeURIComponent(para)}`
+    + (cc.length > 0 ? `&cc=${encodeURIComponent(cc.join(','))}` : '')
+    + `&subject=${encodeURIComponent(assunto)}`
+    + `&body=${encodeURIComponent(corpo)}`;
+
+  return `https://outlook.office.com/mail/deeplink/compose?${diretos}&mailtouri=${encodeURIComponent(mailtoUri)}`;
+}
+
+export function mensagemErroDestinatariosEmail(destinatario) {
+  const erro = destinatario?.erro;
+  if (erro === 'principal_vazio') {
+    return 'O cadastro do preceptor não possui e-mail principal. Informe o e-mail principal no cadastro para preparar o e-mail no Outlook.';
+  }
+  if (erro === 'principal_invalido') {
+    return `O e-mail principal "${destinatario.email}" do cadastro do preceptor é inválido. Corrija o cadastro do preceptor antes de preparar o e-mail no Outlook.`;
+  }
+  if (erro === 'copia_invalido') {
+    return `O e-mail para cópia "${destinatario.email}" do cadastro do preceptor é inválido. Corrija o cadastro do preceptor (e-mails para cópia) antes de preparar o e-mail no Outlook.`;
+  }
+  return 'Não foi possível montar os destinatários do e-mail. Verifique o cadastro do preceptor e tente novamente.';
+}
+
+function mensagemErroEmailsCopia(error) {
+  const msg = String((error && error.message) || '');
+  const bruto = `${msg} ${String((error && error.details) || '')}`;
+  if (msg.includes('email_principal_repetido')) {
+    return 'Este e-mail já é o e-mail principal do preceptor e não pode ser usado como e-mail para cópia.';
+  }
+  if (msg.includes('email_principal_duplicado_copia')) {
+    return 'Este e-mail já está cadastrado como e-mail para cópia ativo do preceptor. Desative o endereço antes de alterar o e-mail principal.';
+  }
+  if (msg.includes('email_invalido')) return 'Informe um e-mail válido para cópia.';
+  if (msg.includes('email_vazio')) return 'O e-mail para cópia não pode ficar vazio.';
+  if (error && (error.code === '23505' || /duplicate key|já está cadastrado/i.test(bruto))) {
+    return 'Este e-mail já está cadastrado para este preceptor.';
+  }
+  if (error && (error.code === '42501' || error.code === 'PGRST301' || /permission denied|row-level security/i.test(bruto))) {
+    return 'Você não tem permissão para alterar os e-mails para cópia.';
+  }
+  if (error && error.code === '23503') return 'Preceptor não encontrado para salvar os e-mails para cópia.';
+  if (/constraint|violates|foreign key|syntax error|relation |column |sqlstate/i.test(msg)) {
+    return 'Não foi possível salvar os e-mails para cópia. Verifique os dados e tente novamente.';
+  }
+  return 'Não foi possível salvar os e-mails para cópia. Tente novamente.';
+}
+
+export async function fetchEmailsCopia(preceptorId) {
+  if (!preceptorId) return [];
+  const { data, error } = await supabase
+    .from('preceptor_emails_copia')
+    .select('id, preceptor_id, email, ativo, criado_em, atualizado_em')
+    .eq('preceptor_id', preceptorId)
+    .order('criado_em', { ascending: true });
+  if (error) throw new Error(mensagemErroEmailsCopia(error));
+  return (data || []).map((row) => ({ ...row, email: normalizarEmailCopia(row.email) }));
+}
+
+export async function salvarEmailsCopia(preceptorId, lista) {
+  if (!preceptorId) return [];
+  const desejados = (lista || [])
+    .map((item) => ({
+      id: item?.id || null,
+      email: normalizarEmailCopia(item?.email),
+      ativo: item?.ativo !== false
+    }))
+    .filter((item) => item.email);
+
+  const existentes = await fetchEmailsCopia(preceptorId);
+  const porId = new Map(existentes.map((r) => [r.id, r]));
+  const porEmail = new Map(existentes.map((r) => [normalizarEmailCopia(r.email).toLowerCase(), r]));
+
+  for (const item of desejados) {
+    const chave = item.email.toLowerCase();
+    const atual = item.id ? porId.get(item.id) : null;
+    if (atual) {
+      const detentor = porEmail.get(chave);
+      if (detentor && detentor.id !== atual.id) {
+        throw new Error(`Este e-mail já está cadastrado para este preceptor: "${item.email}".`);
+      }
+      const { error } = await supabase
+        .from('preceptor_emails_copia')
+        .update({ email: item.email, ativo: item.ativo })
+        .eq('id', atual.id);
+      if (error) throw new Error(mensagemErroEmailsCopia(error));
+      continue;
+    }
+    const detentor = porEmail.get(chave);
+    if (detentor) {
+      const { error } = await supabase
+        .from('preceptor_emails_copia')
+        .update({ email: item.email, ativo: item.ativo })
+        .eq('id', detentor.id);
+      if (error) throw new Error(mensagemErroEmailsCopia(error));
+    } else {
+      const { error } = await supabase
+        .from('preceptor_emails_copia')
+        .insert({ preceptor_id: preceptorId, email: item.email, ativo: item.ativo });
+      if (error) throw new Error(mensagemErroEmailsCopia(error));
+    }
+  }
+
+  return fetchEmailsCopia(preceptorId);
+}
+
 export async function inativarPreceptor(id) {
   const { error: e1 } = await supabase.from('preceptores').update({ status: 'inativo' }).eq('id', id);
   if (e1) throw e1;
@@ -240,6 +527,11 @@ export async function reativarVinculoInternato(id) {
   if (error) throw error;
 }
 
+export async function reativarPreceptor(id) {
+  const { error } = await supabase.from('preceptores').update({ status: 'ativo' }).eq('id', id);
+  if (error) throw error;
+}
+
 export async function insertVinculoPratica(dados) {
   const { data, error } = await supabase.from('vinculos_adm').insert({
     preceptor_id: dados.preceptor_id,
@@ -251,6 +543,7 @@ export async function insertVinculoPratica(dados) {
     setor_id: dados.setor_id || null,
     data_inicio: dados.data_inicio || null,
     data_fim: dados.data_inicio ? (dados.data_fim || null) : null,
+    valor_inicial: dados.valor_inicial ?? null,
     status: 'ativo'
   }).select().single();
   if (error) throw error;
@@ -268,6 +561,10 @@ export async function insertVinculoInternato(dados) {
     setor_id: dados.setor_id || null,
     data_inicio: dados.data_inicio || null,
     data_fim: dados.data_inicio ? (dados.data_fim || null) : null,
+    modalidade_pagamento_id: dados.modalidade_pagamento_id || null,
+    cnpj: normalizeCnpj(dados.cnpj),
+    razao_social: dados.razao_social || null,
+    valor_inicial: dados.valor_inicial ?? null,
     status: 'ativo'
   }).select().single();
   if (error) throw error;
@@ -282,15 +579,28 @@ export function isVinculoCompleto(v, tipoAtuacao) {
 export function getVinculoCamposFaltantes(v, tipoAtuacao) {
   const f = [];
   if (!v?.preceptor?.status || v.preceptor.status !== 'ativo') f.push('Preceptor inativo');
+  if (!v?.status || v.status !== 'ativo') f.push('Vínculo inativo');
   if (!v?.preceptor?.nome_completo?.trim()) f.push('Nome completo');
-  if (!v?.unidade_id) f.push('Unidade');
+  if (!v?.unidade_id && !v?.preceptor?.unidade_id) f.push('Unidade');
   if (!v?.preceptor?.profissao_id) f.push('Profissão');
   if (tipoAtuacao === 'adm') { if (!v?.disciplina_id) f.push('Disciplina'); }
   else { if (!v?.internato_id) f.push('Internato'); }
   if (!v?.periodo_id) f.push('Período');
   if (!v?.local_id) f.push('Local de atuação');
   if (!v?.semestre_id) f.push('Semestre');
+  if (!v?.data_inicio) f.push('Início da vigência');
   return f;
+}
+
+export function isDadosGeraisCompleto(p, modalidadeNome) {
+  if (!p?.nome_completo?.trim()) return false;
+  if (!p?.profissao_id) return false;
+  if (!p?.modalidade_pagamento_id) return false;
+  if (modalidadeNome?.toLowerCase().includes('nfs')) {
+    if (!p?.cnpj?.trim()) return false;
+    if (!p?.razao_social?.trim()) return false;
+  }
+  return true;
 }
 
 // Associação ativa de Regra Financeira do vínculo (histórico preservado nas inativas).
@@ -341,7 +651,8 @@ export async function updateVinculoPratica(id, dados) {
     local_id: dados.local_id || null,
     setor_id: dados.setor_id || null,
     data_inicio: dados.data_inicio || null,
-    data_fim: dados.data_inicio ? (dados.data_fim || null) : null
+    data_fim: dados.data_inicio ? (dados.data_fim || null) : null,
+    valor_inicial: dados.valor_inicial ?? null
   }).eq('id', id).select().single();
   if (error) throw error;
   return data;
@@ -356,10 +667,52 @@ export async function updateVinculoInternato(id, dados) {
     local_id: dados.local_id || null,
     setor_id: dados.setor_id || null,
     data_inicio: dados.data_inicio || null,
-    data_fim: dados.data_inicio ? (dados.data_fim || null) : null
+    data_fim: dados.data_inicio ? (dados.data_fim || null) : null,
+    modalidade_pagamento_id: dados.modalidade_pagamento_id || null,
+    cnpj: normalizeCnpj(dados.cnpj),
+    razao_social: dados.razao_social || null,
+    valor_inicial: dados.valor_inicial ?? null,
+    status: dados.status || 'ativo'
   }).eq('id', id).select().single();
   if (error) throw error;
   return data;
+}
+
+export async function verificarDuplicidadeVinculo(dados, excludeId) {
+  const norm = v => {
+    if (v == null) return null;
+    const s = String(v).trim();
+    return s === '' ? null : s;
+  };
+  const preceptorId = norm(dados.preceptor_id);
+  if (!preceptorId) return false;
+
+  let query = supabase
+    .from('vinculos_internato')
+    .select('id')
+    .eq('preceptor_id', preceptorId)
+    .eq('status', 'ativo')
+    .limit(1);
+
+  const addFilter = (col, val) => {
+    const v = norm(val);
+    if (v) query = query.eq(col, v);
+    else query = query.is(col, null);
+  };
+
+  addFilter('internato_id', dados.internato_id);
+  addFilter('periodo_id', dados.periodo_id);
+  addFilter('semestre_id', dados.semestre_id);
+  addFilter('local_id', dados.local_id);
+  addFilter('setor_id', dados.setor_id);
+  addFilter('data_inicio', dados.data_inicio);
+  addFilter('data_fim', dados.data_fim);
+
+  if (excludeId) query = query.neq('id', excludeId);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data || []).length > 0;
 }
 
 export async function fetchPeriodosByRange(min, max) {
@@ -479,6 +832,83 @@ export async function upsertVinculoLocal(dados) {
   const { data, error } = await supabase.from('vinculo_locais').insert(insertData).select().single();
   if (error) throw error;
   return data;
+}
+
+// ── Coordenadores do vínculo (M:N) ──
+export async function fetchCoordenadoresAtivos() {
+  const { data, error } = await supabase
+    .from('user_roles')
+    .select('id, profile_id, role, profiles!user_roles_profile_id_fkey(id, nome_completo, email)')
+    .eq('role', 'coordenador')
+    .eq('ativo', true);
+  if (error) throw error;
+  return (data || []).map(r => ({ ...r.profiles, role_id: r.id }));
+}
+
+export async function fetchVinculoCoordenadores(vinculoInternatoId) {
+  if (!vinculoInternatoId) return [];
+  const { data, error } = await supabase
+    .from('vinculo_coordenadores')
+    .select('id, profile_id, profiles!vinculo_coordenadores_profile_id_fkey(id, nome_completo, email)')
+    .eq('vinculo_internato_id', vinculoInternatoId)
+    .eq('status', 'ativo');
+  if (error) throw error;
+  return (data || []).map(r => ({ id: r.id, profile_id: r.profile_id, ...r.profiles }));
+}
+
+export async function salvarVinculoCoordenadores(vinculoIntId, profileIds) {
+  if (!vinculoIntId) return [];
+  const desired = [...new Set(profileIds || [])];
+
+  const { data: allRows, error: fetchErr } = await supabase
+    .from('vinculo_coordenadores')
+    .select('id, profile_id, status')
+    .eq('vinculo_internato_id', vinculoIntId);
+  if (fetchErr) throw fetchErr;
+
+  const activeRows = (allRows || []).filter(r => r.status === 'ativo');
+  const activeIds = activeRows.map(r => r.profile_id);
+  const inactiveRows = (allRows || []).filter(r => r.status !== 'ativo');
+
+  const toReactivate = inactiveRows.filter(r => desired.includes(r.profile_id));
+  const toAdd = desired.filter(pid => !activeIds.includes(pid) && !toReactivate.some(r => r.profile_id === pid));
+  const toRemove = activeRows.filter(r => !desired.includes(r.profile_id));
+
+  if (toRemove.length > 0) {
+    const { error: delErr } = await supabase
+      .from('vinculo_coordenadores')
+      .update({ status: 'inativo' })
+      .in('id', toRemove.map(r => r.id));
+    if (delErr) throw delErr;
+  }
+
+  for (const row of toReactivate) {
+    const { error: reErr } = await supabase
+      .from('vinculo_coordenadores')
+      .update({ status: 'ativo' })
+      .eq('id', row.id);
+    if (reErr) throw reErr;
+  }
+
+  if (toAdd.length === 0) {
+    return activeRows.filter(r => desired.includes(r.profile_id))
+      .concat(toReactivate.map(r => ({ id: r.id, profile_id: r.profile_id, status: 'ativo' })));
+  }
+
+  const inserts = toAdd.map(profile_id => ({
+    vinculo_internato_id: vinculoIntId,
+    profile_id,
+    status: 'ativo'
+  }));
+  const { data, error: insErr } = await supabase
+    .from('vinculo_coordenadores')
+    .insert(inserts)
+    .select();
+  if (insErr) throw insErr;
+
+  return (data || [])
+    .concat(activeRows.filter(r => desired.includes(r.profile_id)))
+    .concat(toReactivate.map(r => ({ id: r.id, profile_id: r.profile_id, status: 'ativo' })));
 }
 
 export async function insertLocal(dados) {
@@ -853,7 +1283,7 @@ export async function fetchVinculosParaEscalasPage() {
   const [resAdm, resInt] = await Promise.all([
     supabase.from('vinculos_adm').select(`
       id, preceptor_id, disciplina_id, periodo_id, unidade_id, local_id, setor_id, semestre_id, status, data_inicio, data_fim,
-      preceptor:preceptores(id, nome_completo, status, profissao_id),
+      preceptor:preceptores(id, nome_completo, status, profissao_id, unidade_id, profissao_ref:profissoes!preceptores_profissao_id_fkey(id, nome)),
       disciplina:disciplinas(nome),
       periodo:periodos(numero, nome),
       unidade:unidades(id, nome),
@@ -864,14 +1294,18 @@ export async function fetchVinculosParaEscalasPage() {
     `).eq('status', 'ativo'),
     supabase.from('vinculos_internato').select(`
       id, preceptor_id, internato_id, periodo_id, unidade_id, local_id, setor_id, semestre_id, status, data_inicio, data_fim,
-      preceptor:preceptores(id, nome_completo, status, profissao_id),
+      preceptor:preceptores(id, nome_completo, status, profissao_id, unidade_id, profissao_ref:profissoes!preceptores_profissao_id_fkey(id, nome)),
       internato:internatos(nome, numero),
       periodo:periodos(numero, nome),
       unidade:unidades(id, nome),
       local:locais(id, nome),
       setor:setores(id, nome),
       semestre:semestres(codigo),
-      vinculo_regras:vinculo_regras_financeiras(${VINCULO_REGRA_EMBED})
+      vinculo_regras:vinculo_regras_financeiras(${VINCULO_REGRA_EMBED}),
+      coordenadores:vinculo_coordenadores!vinculo_coordenadores_vinculo_internato_id_fkey(
+        id, profile_id, status,
+        profiles!vinculo_coordenadores_profile_id_fkey(id, nome_completo, email)
+      )
     `).eq('status', 'ativo')
   ]);
   if (resAdm.error) throw resAdm.error;
@@ -915,6 +1349,7 @@ export async function fetchVinculosParaEscalasPage() {
       vinculo_completo: completo,
       vinculo_campos_faltantes: completo ? [] : getVinculoCamposFaltantes(v, v.tipo_atuacao),
       preceptor_nome: p?.nome_completo || '-',
+      profissao: p?.profissao_ref?.nome || '-',
       modalidade_label: v.tipo_atuacao === 'adm' ? 'Prática' : 'Internato',
       unidade_nome: v.unidade?.nome || '-',
       disciplina_nome: v.disciplina?.nome || '-',
@@ -927,7 +1362,8 @@ export async function fetchVinculosParaEscalasPage() {
       escalas: escs,
       escalas_ativas_count: ativas.length,
       escalas_total_count: escs.length,
-      regraAtiva: getRegraAtiva(v)
+      regraAtiva: getRegraAtiva(v),
+      coordenadores: (v.coordenadores || []).filter(c => c.status === 'ativo')
     };
   });
 }
@@ -983,7 +1419,7 @@ export async function fetchVinculosLocaisParaEscalas() {
 export async function fetchEscalasPorVinculo(vinculoAdmId, vinculoInternatoId) {
   let q = supabase.from('escalas').select(`
     *,
-    itens:escalas_itens(data, dia_semana, turno),
+    itens:escalas_itens(data, dia_semana, turno, setor_id, setor:setores(nome)),
     vinculo_local:vinculo_locais(
       id, local_id, setor_id,
       local:locais(nome),
@@ -995,19 +1431,53 @@ export async function fetchEscalasPorVinculo(vinculoAdmId, vinculoInternatoId) {
   q = q.order('created_at', { ascending: false });
   const { data, error } = await q;
   if (error) throw error;
-  return (data || []).map(e => ({
-    ...e,
-    itens: e.itens || [],
-    local_nome: e.vinculo_local?.local?.nome || '-',
-    setor_nome: e.vinculo_local?.setor?.nome || '-'
-  }));
+  return (data || []).map(e => {
+    const setorLegado = e.vinculo_local?.setor?.nome || '';
+    return {
+      ...e,
+      itens: (e.itens || []).map(i => ({
+        ...i,
+        setor_nome: i.setor?.nome || setorLegado
+      })),
+      local_nome: e.vinculo_local?.local?.nome || '-',
+      setor_nome: setorLegado || '-'
+    };
+  });
+}
+
+export function ehMensagemConflito(mensagem) {
+  return /^Conflito de (horário|escala)/i.test(String(mensagem || '').trim());
+}
+
+export async function validarConflitoEscala(dados) {
+  const itens = (dados.itens || []).map(i => ({ data: i.data, turno: i.turno }));
+  const { data, error } = await supabase.rpc('validar_conflito_escala_itens', {
+    p_itens: itens,
+    p_vinculo_adm_id: dados.vinculo_adm_id || null,
+    p_vinculo_internato_id: dados.vinculo_internato_id || null,
+    p_preceptor_id: dados.preceptor_id || null,
+    p_escala_id: dados.escala_id || null
+  });
+  if (error) throw error;
+  return data || { conflito: false };
 }
 
 export async function salvarEscala(dados) {
   const itens = (dados.itens || []).map(i => ({
     data: i.data,
-    turno: i.turno
+    turno: i.turno,
+    ...(i.setor_id ? { setor_id: i.setor_id } : {})
   }));
+  if ((dados.status || 'ativo') === 'ativo' && itens.length > 0) {
+    try {
+      const validacao = await validarConflitoEscala({ ...dados, itens });
+      if (validacao && validacao.conflito) {
+        throw new Error(validacao.mensagem || 'Conflito de horário.');
+      }
+    } catch (e) {
+      if (ehMensagemConflito(e && e.message)) throw e;
+    }
+  }
   const { data, error } = await supabase.rpc('salvar_escala_completa', {
     p_tipo_atuacao: dados.tipo_atuacao,
     p_vinculo_local_id: dados.vinculo_local_id,
@@ -1105,7 +1575,13 @@ export async function fetchFolhaPresenca({ preceptorId = null, competencia = nul
     .order('turno', { ascending: true });
 
   if (preceptorId) q = q.eq('preceptor_id', preceptorId);
-  if (competencia) q = q.gte('data_presenca', `${competencia}-01`).lte('data_presenca', `${competencia}-31`);
+  if (competencia) {
+    const [ano, mes] = competencia.split('-').map(Number);
+    const proxMes = mes === 12 ? 1 : mes + 1;
+    const proxAno = mes === 12 ? ano + 1 : ano;
+    const inicioProxMes = `${proxAno}-${String(proxMes).padStart(2, '0')}-01`;
+    q = q.gte('data_presenca', `${competencia}-01`).lt('data_presenca', inicioProxMes);
+  }
   if (localId) q = q.eq('local_id', localId);
 
   const { data, error } = await q;
@@ -1135,7 +1611,8 @@ export async function fetchFolhaPresenca({ preceptorId = null, competencia = nul
         unidade_nome: unidadeNome,
         local_id: localIdKey,
         local_nome: localNome,
-        setor_nome: setorNome,
+        setor_nome: '',
+        setores: [],
         disciplina_nome: tipo === 'adm' ? (vinc.disciplina?.nome || '') : '',
         internato_nome: tipo === 'internato' ? (vinc.internato?.nome || '') : '',
         periodo_nome: vinc.periodo?.numero ? `${vinc.periodo.numero}º período` : 'Não informado',
@@ -1145,6 +1622,7 @@ export async function fetchFolhaPresenca({ preceptorId = null, competencia = nul
       };
     }
     const g = grupos[key];
+    if (setorNome && !g.setores.includes(setorNome)) g.setores.push(setorNome);
     g.total_turnos += 1;
     g.itens.push({
       id: pr.id,
@@ -1157,7 +1635,7 @@ export async function fetchFolhaPresenca({ preceptorId = null, competencia = nul
     });
   }
 
-  return Object.values(grupos).sort((a, b) =>
+  return Object.values(grupos).map(g => ({ ...g, setor_nome: g.setores.join(', ') })).sort((a, b) =>
     String(b.competencia).localeCompare(String(a.competencia)) ||
     a.preceptor_nome.localeCompare(b.preceptor_nome)
   );
@@ -1172,7 +1650,7 @@ export async function fetchCalendarioPresencas(ano, mes) {
   const { data: itens, error: eiErr } = await supabase
     .from('escalas_itens')
     .select(`
-      data, turno, escala_id,
+      data, turno, escala_id, setor_id, setor:setores(nome),
       escala:escalas!inner(
         id, tipo_atuacao, vinculo_adm_id, vinculo_internato_id,
         vinculo_adm:vinculos_adm(
@@ -1220,7 +1698,7 @@ export async function fetchCalendarioPresencas(ano, mes) {
     const p = vinc.preceptor;
     const uid = vinc.unidade?.nome || '-';
     const lid = vinc.local?.nome || '-';
-    const sid = vinc.setor?.nome || '';
+    const sid = it.setor?.nome || vinc.setor?.nome || '';
     const aid = e.tipo_atuacao === 'adm' ? (vinc.disciplina?.nome || '-') : (vinc.internato?.nome || '-');
     const pid = vinc.periodo?.numero ? `${vinc.periodo.numero}º período` : 'Não informado';
     const key = `${e.id}|${d}`;
@@ -1230,11 +1708,12 @@ export async function fetchCalendarioPresencas(ano, mes) {
         escala_id: e.id, preceptor_id: p.id, preceptor_nome: p.nome_completo,
         tipo_atuacao: e.tipo_atuacao,
         modalidade_label: e.tipo_atuacao === 'adm' ? 'Prática' : 'Internato',
-        unidade_nome: uid, local_nome: lid, setor_nome: sid,
+        unidade_nome: uid, local_nome: lid, setor_nome: sid, setores: [],
         atividade_nome: aid, periodo_nome: pid,
         turnos_previstos: [], turnos_confirmados: []
       };
     }
+    if (sid && !porData[d][key].setores.includes(sid)) porData[d][key].setores.push(sid);
     if (!porData[d][key].turnos_previstos.includes(it.turno)) {
       porData[d][key].turnos_previstos.push(it.turno);
     }
@@ -1258,7 +1737,8 @@ export async function fetchCalendarioPresencas(ano, mes) {
       let status_lista = 'pendente';
       if (confirmados.length === p.turnos_previstos.length) status_lista = 'confirmada';
       else if (confirmados.length > 0) status_lista = 'parcial';
-      return { ...p, turnos_confirmados: confirmados, turnos_pendentes: pendentes, status_lista };
+      const setor_nome = (p.setores && p.setores.length) ? p.setores.join(', ') : (p.setor_nome || '');
+      return { ...p, setor_nome, turnos_confirmados: confirmados, turnos_pendentes: pendentes, status_lista };
     });
     const escalados = arr.length;
     const comConfirmacao = arr.filter(p => p.turnos_confirmados.length > 0).length;
@@ -1480,7 +1960,9 @@ export function statusBadge(status) {
 // ── Helper: Formatar data ──
 export function fmtData(d) {
   if (!d) return '-';
-  return new Date(d + 'T00:00:00').toLocaleDateString('pt-BR');
+  const s = String(d);
+  if (s.includes('T')) return new Date(s).toLocaleDateString('pt-BR');
+  return new Date(s + 'T00:00:00').toLocaleDateString('pt-BR');
 }
 
 export function fmtTimestamp(t) {
@@ -2287,16 +2769,60 @@ export async function buscarFilaFinanceira(filtros = {}) {
   return data || [];
 }
 
-export async function atualizarChamado(calculoId, { chamadoNumero, chamadoStatus, chamadoObservacao }) {
-  const { data, error } = await supabase.rpc('atualizar_chamado', {
-    p_calculo_id: calculoId,
-    p_chamado_numero: chamadoNumero || null,
-    p_chamado_status: chamadoStatus || null,
-    p_chamado_observacao: chamadoObservacao || null
+export async function resolverCompetenciaIdPorCalculos(calculoIds) {
+  const ids = [...new Set((calculoIds || []).filter(Boolean))];
+  if (ids.length === 0) return null;
+  try {
+    const { data, error } = await supabase
+      .from('calculos')
+      .select('id, competencia_id')
+      .in('id', ids);
+    if (error || !data || data.length === 0) return null;
+    const comp = data.find(d => d.competencia_id);
+    return comp ? comp.competencia_id : null;
+  } catch (e) {
+    console.warn('[resolverCompetenciaIdPorCalculos]', e);
+    return null;
+  }
+}
+
+export async function anexarCamposFilaFinanceira(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return rows;
+  const faltando = rows.filter(r => !r.competencia_id && r.id);
+  if (faltando.length === 0) return rows;
+  try {
+    const { data, error } = await supabase
+      .from('calculos')
+      .select('id, competencia_id, vinculo_adm_id, vinculo_internato_id')
+      .in('id', faltando.map(r => r.id));
+    if (error || !data || data.length === 0) return rows;
+    const mapa = Object.fromEntries(data.map(d => [d.id, d]));
+    return rows.map(r => {
+      if (r.competencia_id) return r;
+      const d = mapa[r.id];
+      if (!d || !d.competencia_id) return r;
+      return {
+        ...r,
+        competencia_id: d.competencia_id,
+        vinculo_adm_id: r.vinculo_adm_id ?? d.vinculo_adm_id ?? null,
+        vinculo_internato_id: r.vinculo_internato_id ?? d.vinculo_internato_id ?? null
+      };
+    });
+  } catch (e) {
+    console.warn('[anexarCamposFilaFinanceira]', e);
+    return rows;
+  }
+}
+
+export async function verificarDesatualizacaoCompetencia(mes, ano) {
+  const { data, error } = await supabase.rpc('verificar_desatualizacao_competencia', {
+    p_mes: Number(mes),
+    p_ano: Number(ano)
   });
   if (error) throw error;
-  return data;
+  return data || { possui_desatualizacao: false, vinculos_desatualizados: [], vinculos_nao_calculados: [], ultima_apuracao: null, total_vinculos_com_presenca: 0, total_calculados_ok: 0 };
 }
+
 
 export async function fetchDetalhesCalculoCompleto(calculoId) {
   const { data: calc, error: calcErr } = await supabase
@@ -2305,7 +2831,6 @@ export async function fetchDetalhesCalculoCompleto(calculoId) {
       id, competencia_id, preceptor_id, tipo_atuacao, modalidade, status,
       total_bruto, total_descontos, total_liquido, versao, calculado_em, observacoes,
       quantidade_presencas, vinculo_adm_id, vinculo_internato_id,
-      chamado_numero, chamado_status, chamado_observacao, chamado_updated_at,
       preceptor:preceptores!calculos_preceptor_id_fkey(id, nome_completo, cpf),
       competencia:competencias(ano, mes, data_inicio, data_fim, status)
     `)
@@ -2328,14 +2853,14 @@ export async function fetchDetalhesCalculoCompleto(calculoId) {
   if (tipoAtuacao === 'adm' && calc.vinculo_adm_id) {
     const { data: vinc } = await supabase
       .from('vinculos_adm')
-      .select('id, unidade:unidades(id, nome), disciplina:disciplinas(id, nome), local:locais(id, nome), setor:setores(id, nome)')
+      .select('id, valor_inicial, periodo:periodos(numero, nome), unidade:unidades(id, nome), disciplina:disciplinas(id, nome), local:locais(id, nome), setor:setores(id, nome)')
       .eq('id', calc.vinculo_adm_id)
       .single();
     vinculoContexto = vinc;
   } else if (tipoAtuacao === 'internato' && calc.vinculo_internato_id) {
     const { data: vinc } = await supabase
       .from('vinculos_internato')
-      .select('id, unidade:unidades(id, nome), internato:internatos(id, nome), local:locais(id, nome), setor:setores(id, nome)')
+      .select('id, valor_inicial, periodo:periodos(numero, nome), unidade:unidades(id, nome), internato:internatos(id, nome), local:locais(id, nome), setor:setores(id, nome)')
       .eq('id', calc.vinculo_internato_id)
       .single();
     vinculoContexto = vinc;
@@ -2386,33 +2911,113 @@ export async function fetchDetalhesCalculoCompleto(calculoId) {
   }
 
   let regra = null;
+  let vinculoRegra = null;
   if (tipoAtuacao === 'adm' && calc.vinculo_adm_id) {
     const { data: vr } = await supabase
       .from('vinculo_regras_financeiras')
-      .select('regra:regras_financeiras(id, nome, tipo_atuacao, componentes:regra_componentes(*))')
+      .select('id, data_inicio, data_fim, status, regra:regras_financeiras(id, nome, tipo_atuacao, componentes:regra_componentes(*))')
       .eq('vinculo_adm_id', calc.vinculo_adm_id)
       .eq('status', 'ativo')
       .limit(1)
       .maybeSingle();
     regra = vr?.regra || null;
+    vinculoRegra = vr || null;
   } else if (tipoAtuacao === 'internato' && calc.vinculo_internato_id) {
     const { data: vr } = await supabase
       .from('vinculo_regras_financeiras')
-      .select('regra:regras_financeiras(id, nome, tipo_atuacao, componentes:regra_componentes(*))')
+      .select('id, data_inicio, data_fim, status, regra:regras_financeiras(id, nome, tipo_atuacao, componentes:regra_componentes(*))')
       .eq('vinculo_internato_id', calc.vinculo_internato_id)
       .eq('status', 'ativo')
       .limit(1)
       .maybeSingle();
     regra = vr?.regra || null;
+    vinculoRegra = vr || null;
   }
+
+  let notaSituacao = null;
+  const { data: nota } = await supabase
+    .from('solicitacoes_nota_fiscal')
+    .select('situacao')
+    .eq('calculo_id', calculoId)
+    .maybeSingle();
+  notaSituacao = nota?.situacao || null;
+
+  let revisao = null;
+  const { data: rev } = await supabase
+    .from('aprovacoes')
+    .select('id, tipo, status, decidido_em, decidido_por, comentario, profile:profiles!aprovacoes_decidido_por_fkey(nome_completo)')
+    .eq('calculo_id', calculoId)
+    .eq('tipo', 'financeira')
+    .order('decidido_em', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  revisao = rev || null;
 
   return {
     calculo: { ...calc, tipo_atuacao: tipoAtuacao },
     itens: itens || [],
     presencas,
     vinculoContexto,
-    regra
+    regra,
+    vinculoRegra,
+    notaSituacao,
+    revisao
   };
+}
+
+export async function fetchRevisoesCompetencia(calculoIds) {
+  if (!calculoIds || calculoIds.length === 0) return {};
+  const { data, error } = await supabase
+    .from('aprovacoes')
+    .select('calculo_id, id, status, decidido_em, decidido_por, comentario, profile:profiles!aprovacoes_decidido_por_fkey(nome_completo)')
+    .in('calculo_id', calculoIds)
+    .eq('tipo', 'financeira');
+  if (error) {
+    console.warn('Erro ao buscar revisões financeiras:', error);
+    return {};
+  }
+  const map = {};
+  (data || []).forEach(rev => {
+    if (!map[rev.calculo_id] || new Date(rev.decidido_em) > new Date(map[rev.calculo_id].decidido_em)) {
+      map[rev.calculo_id] = rev;
+    }
+  });
+  return map;
+}
+
+export async function salvarRevisaoFinanceira(calculoId, authUserId, comentario = null) {
+  let profileId = null;
+  if (authUserId) {
+    const { data: profile } = await supabase.from('profiles').select('id').eq('user_id', authUserId).maybeSingle();
+    profileId = profile?.id || null;
+  }
+  const { data: atual, error: atualErr } = await supabase
+    .from('aprovacoes')
+    .select('id')
+    .eq('calculo_id', calculoId)
+    .eq('tipo', 'financeira')
+    .order('decidido_em', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (atualErr) throw atualErr;
+
+  const payload = {
+    calculo_id: calculoId,
+    tipo: 'financeira',
+    status: 'aprovado',
+    decidido_por: profileId,
+    decidido_em: new Date().toISOString(),
+    comentario: comentario?.trim() || null
+  };
+
+  if (atual?.id) {
+    const { data, error } = await supabase.from('aprovacoes').update(payload).eq('id', atual.id).select().single();
+    if (error) throw error;
+    return data;
+  }
+  const { data, error } = await supabase.from('aprovacoes').insert(payload).select().single();
+  if (error) throw error;
+  return data;
 }
 
 export function apuracaoMesLabel(mes, ano) {
@@ -2421,14 +3026,6 @@ export function apuracaoMesLabel(mes, ano) {
   return `${MESES[mes - 1] || mes}/${ano}`;
 }
 
-export const CHAMADO_STATUS_OPTIONS = [
-  { value: 'nao_aberto', label: 'Não aberto' },
-  { value: 'aberto', label: 'Aberto' },
-  { value: 'em_analise', label: 'Em análise' },
-  { value: 'deferido', label: 'Deferido' },
-  { value: 'indeferido', label: 'Indeferido' },
-  { value: 'concluido', label: 'Concluído' }
-];
 
 
 // ── Validações financeiras ──
@@ -2492,7 +3089,7 @@ export async function fetchPainelPagamentos({ incluirTodos = false } = {}) {
   const ids = [...new Set((rows || []).map(r => r.preceptor_id).filter(Boolean))];
   let cadastroMap = {};
   if (ids.length) {
-    const { data, error } = await supabase.from('preceptores').select('id,email,profile_id,valor_inicial').in('id', ids);
+    const { data, error } = await supabase.from('preceptores').select('id,email,profile_id,cpf,cnpj,razao_social,nome_social,conselho_tipo,conselho_numero,profissao,profissao_id').in('id', ids);
     if (error) throw new Error('Não foi possível consultar o cadastro dos preceptores: ' + error.message);
     const profilesIds = [...new Set((data || []).map(p => p.profile_id).filter(Boolean))];
     let profileEmails = {};
@@ -2501,11 +3098,270 @@ export async function fetchPainelPagamentos({ incluirTodos = false } = {}) {
       if (profileError) throw new Error('Não foi possível consultar os e-mails dos perfis: ' + profileError.message);
       profileEmails = Object.fromEntries((profiles || []).map(p => [p.id, p.email || '']));
     }
-    cadastroMap = Object.fromEntries((data || []).map(p => [p.id, { email: p.email || profileEmails[p.profile_id] || '', saldo: Number(p.valor_inicial || 0) }]));
+    const profissaoIds = [...new Set((data || []).map(p => p.profissao_id).filter(Boolean))];
+    let profissaoMap = {};
+    if (profissaoIds.length) {
+      try {
+        const { data: profData } = await supabase.from('profissoes').select('id,nome').in('id', profissaoIds);
+        profissaoMap = Object.fromEntries((profData || []).map(p => [p.id, p.nome || '']));
+      } catch (profErr) {
+        console.warn('[fetchPainelPagamentos] Falha ao carregar profissões:', profErr);
+      }
+    }
+    cadastroMap = Object.fromEntries((data || []).map(p => [p.id, {
+      email: p.email || profileEmails[p.profile_id] || '',
+      cpf: p.cpf || '',
+      cnpj: p.cnpj || '',
+      razao_social: p.razao_social || '',
+      nome_social: p.nome_social || '',
+      conselho_tipo: p.conselho_tipo || '',
+      conselho_numero: p.conselho_numero || '',
+      profissao: profissaoMap[p.profissao_id] || p.profissao || ''
+    }]));
   }
+  const vinculoIds = [...new Set((rows || []).map(r => r.vinculo_internato_id).filter(Boolean))];
+  let vinculoMap = {};
+  if (vinculoIds.length) {
+    const { data: vData } = await supabase.from('vinculos_internato').select('id,cnpj,razao_social,periodo_id,setor_id,valor_inicial').in('id', vinculoIds);
+    const periodoIds = [...new Set((vData || []).map(v => v.periodo_id).filter(Boolean))];
+    const setorIds = [...new Set((vData || []).map(v => v.setor_id).filter(Boolean))];
+    let periodoMap = {};
+    let setorMap = {};
+    if (periodoIds.length) {
+      const { data: pData } = await supabase.from('periodos').select('id,numero').in('id', periodoIds);
+      periodoMap = Object.fromEntries((pData || []).map(p => [p.id, p.numero ? `${p.numero}º período` : '']));
+    }
+    if (setorIds.length) {
+      const { data: sData } = await supabase.from('setores').select('id,nome').in('id', setorIds);
+      setorMap = Object.fromEntries((sData || []).map(s => [s.id, s.nome || '']));
+    }
+    vinculoMap = Object.fromEntries((vData || []).map(v => [v.id, { cnpj: v.cnpj || '', razao_social: v.razao_social || '', periodo_nome: periodoMap[v.periodo_id] || '', setor_nome: setorMap[v.setor_id] || '', valor_inicial: v.valor_inicial }]));
+  }
+  const calcIds = [...new Set((rows || []).map(r => r.id).filter(Boolean))];
+  let modalidadeMap = {};
+  if (calcIds.length) {
+    try {
+      const { data: cData } = await supabase.from('calculos').select('id,modalidade').in('id', calcIds);
+      modalidadeMap = Object.fromEntries((cData || []).map(c => [c.id, c.modalidade || '']));
+    } catch (e) {
+      console.warn('[fetchPainelPagamentos] Falha ao carregar modalidade de pagamento:', e);
+    }
+  }
+  // Saldo semestral do vínculo: null quando não cadastrado (nunca vira 0),
+  // para a lista do Dashboard exibir "Saldo não informado".
+  const saldoSemestralDoVinculo = (vinculoId) => {
+    const v = vinculoMap[vinculoId];
+    if (!v || v.valor_inicial == null || v.valor_inicial === '') return null;
+    const n = Number(v.valor_inicial);
+    return Number.isFinite(n) ? n : null;
+  };
   return (rows || [])
     .filter(r => r.tipo_atuacao === 'internato')
-    .map(r => ({...r, preceptor_email: cadastroMap[r.preceptor_id]?.email || '', saldo_semestral: cadastroMap[r.preceptor_id]?.saldo || 0, situacao_nota: r.situacao_nota || 'nao_solicitada'}));
+    .map(r => ({...r, preceptor_email: cadastroMap[r.preceptor_id]?.email || '', saldo_semestral: saldoSemestralDoVinculo(r.vinculo_internato_id), situacao_nota: r.situacao_nota || 'nao_solicitada', modalidade_pagamento: modalidadeMap[r.id] || '', preceptor_cpf: cadastroMap[r.preceptor_id]?.cpf || '', preceptor_cnpj: cadastroMap[r.preceptor_id]?.cnpj || '', preceptor_razao_social: cadastroMap[r.preceptor_id]?.razao_social || '', preceptor_nome_social: cadastroMap[r.preceptor_id]?.nome_social || '', preceptor_conselho_tipo: cadastroMap[r.preceptor_id]?.conselho_tipo || '', preceptor_conselho_numero: cadastroMap[r.preceptor_id]?.conselho_numero || '', preceptor_profissao: cadastroMap[r.preceptor_id]?.profissao || '', vinculo_cnpj: vinculoMap[r.vinculo_internato_id]?.cnpj || '', vinculo_razao_social: vinculoMap[r.vinculo_internato_id]?.razao_social || '', periodo_nome: vinculoMap[r.vinculo_internato_id]?.periodo_nome || '', vinculo_setor_nome: vinculoMap[r.vinculo_internato_id]?.setor_nome || ''}));
+}
+
+// ── Saldo semestral por preceptor e por vínculo (lista do Dashboard) ──
+//
+// Fonte única dos valores:
+//   • saldo inicial  → vinculos_internato.valor_inicial, chegado à fila como `saldo_semestral`
+//                      (NUNCA preceptores.valor_inicial; null = saldo não informado);
+//   • valor utilizado → soma de total_bruto dos cálculos VÁLIDOS (status permitido) e
+//                      ATUALIZADOS (sem marcação de desatualização) do vínculo no semestre;
+//   • valor pago      → soma de total_bruto das linhas com pagamento concluído
+//                      (situacao_nota = 'pago');
+//   • saldo disponível = saldo inicial − valor utilizado;
+//   • percentual       = valor utilizado ÷ saldo inicial × 100.
+// Cada vínculo é agregado isoladamente (não se mistura saldo entre vínculos).
+export const SALDO_STATUS_VALIDO = ['calculado', 'aprovado', 'fechado', 'pago'];
+export const SALDO_FAIXAS = { verde: 70, amarelo: 90 };
+
+const arred2Saldo = (v) => Math.round((Number(v) || 0) * 100) / 100;
+
+export function chaveVinculoLinha(r) {
+  if (!r) return null;
+  return r.vinculo_internato_id || r.vinculo_adm_id || null;
+}
+
+// Cálculo válido (status permitido) e atualizado (sem observação de desatualização).
+export function calculoSaldoValido(r) {
+  if (!r) return false;
+  if (!SALDO_STATUS_VALIDO.includes(r.status)) return false;
+  if (r.observacoes && r.observacoes !== 'Calculado') return false;
+  return true;
+}
+
+// Mapa por vínculo: saldo inicial (1 valor), utilizado e pago no semestre.
+export function montarMapaSaldosVinculos(rows) {
+  const mapa = new Map();
+  (rows || []).forEach(r => {
+    const k = chaveVinculoLinha(r);
+    if (!k) return;
+    let e = mapa.get(k);
+    if (!e) {
+      e = { chave: k, saldo_inicial: null, utilizado: 0, pago: 0 };
+      mapa.set(k, e);
+    }
+    if (e.saldo_inicial == null && r.saldo_semestral != null && r.saldo_semestral !== '') {
+      const n = Number(r.saldo_semestral);
+      if (Number.isFinite(n)) e.saldo_inicial = n;
+    }
+    if (calculoSaldoValido(r)) e.utilizado = arred2Saldo(e.utilizado + Number(r.total_bruto || 0));
+    if ((r.situacao_nota || '') === 'pago') e.pago = arred2Saldo(e.pago + Number(r.total_bruto || 0));
+  });
+  return mapa;
+}
+
+export function situacaoSaldo(resumo) {
+  if (!resumo || !resumo.temSaldo) return 'Saldo não informado';
+  if (resumo.disponivel != null && resumo.disponivel < 0) return 'Saldo excedido';
+  if (resumo.disponivel != null && resumo.disponivel === 0) return 'Saldo esgotado';
+  if (resumo.percentual >= SALDO_FAIXAS.amarelo) return 'Crítico';
+  if (resumo.percentual >= SALDO_FAIXAS.verde) return 'Atenção';
+  return 'Normal';
+}
+
+export function faixaBarraSaldo(resumo) {
+  if (!resumo || !resumo.temSaldo) return 'cinza';
+  if (resumo.percentual >= SALDO_FAIXAS.amarelo) return 'vermelho';
+  if (resumo.percentual >= SALDO_FAIXAS.verde) return 'amarelo';
+  return 'verde';
+}
+
+// Soma dos vínculos informados (preceptor) ou de um único vínculo (expansão).
+export function resumoSaldoVinculos(chaves, mapa) {
+  const lista = Array.isArray(chaves) ? chaves.filter(Boolean) : [];
+  let saldoInicial = 0, utilizado = 0, pago = 0, temSaldo = false;
+  lista.forEach(k => {
+    const e = (mapa && mapa.get(k)) || null;
+    if (!e) return;
+    if (e.saldo_inicial != null && Number(e.saldo_inicial) > 0) {
+      temSaldo = true;
+      saldoInicial += Number(e.saldo_inicial);
+    }
+    utilizado += Number(e.utilizado || 0);
+    pago += Number(e.pago || 0);
+  });
+  saldoInicial = arred2Saldo(saldoInicial);
+  utilizado = arred2Saldo(utilizado);
+  pago = arred2Saldo(pago);
+  const resumo = {
+    vinculos: lista.length,
+    temSaldo,
+    saldoInicial: temSaldo ? saldoInicial : null,
+    utilizado,
+    pago,
+    disponivel: temSaldo ? arred2Saldo(saldoInicial - utilizado) : null,
+    percentual: temSaldo && saldoInicial > 0 ? (utilizado / saldoInicial) * 100 : null
+  };
+  resumo.situacao = situacaoSaldo(resumo);
+  resumo.faixa = faixaBarraSaldo(resumo);
+  return resumo;
+}
+
+export function percentualSaldoTexto(resumo) {
+  if (!resumo || !resumo.temSaldo || resumo.percentual == null) return '—';
+  return `${resumo.percentual.toFixed(1).replace('.', ',')}%`;
+}
+
+export function larguraBarraSaldo(resumo) {
+  if (!resumo || !resumo.temSaldo || resumo.percentual == null) return 0;
+  return Math.max(0, Math.min(100, resumo.percentual));
+}
+
+// Cabeçalho do preceptor: soma dos vínculos do grupo (uma linha por preceptor+competência).
+export function itensCabecalhoSaldo(resumo, turnos) {
+  const r = resumo || resumoSaldoVinculos([], new Map());
+  const semSaldo = 'Saldo não informado';
+  return [
+    { rot: 'Vínculos', valor: String(r.vinculos || 0) },
+    { rot: 'Turnos', valor: String(Number(turnos || 0)) },
+    { rot: 'Saldo inicial', valor: r.temSaldo ? formatCurrencyBRL(r.saldoInicial) : semSaldo, naoInformado: !r.temSaldo },
+    { rot: 'Valor utilizado', valor: formatCurrencyBRL(r.utilizado) },
+    { rot: 'Valor pago', valor: formatCurrencyBRL(r.pago) },
+    { rot: 'Saldo disponível', valor: r.temSaldo ? formatCurrencyBRL(r.disponivel) : semSaldo, naoInformado: !r.temSaldo, excedente: !!(r.temSaldo && r.disponivel < 0) },
+    { rot: 'Percentual utilizado', valor: percentualSaldoTexto(r) },
+    { rot: 'Situação financeira', valor: r.situacao, faixa: r.faixa }
+  ];
+}
+
+// Filtros rápidos de saldo da lista (um ativo por vez, somente sobre a lista).
+export function passaFiltroSaldo(resumo, modo) {
+  if (!modo) return true;
+  if (modo === 'nao_informado') return !resumo || !resumo.temSaldo;
+  if (!resumo || !resumo.temSaldo) return false;
+  if (modo === 'acima80') return resumo.percentual > 80;
+  if (modo === 'esgotado') return arred2Saldo(resumo.disponivel) <= 0;
+  return true;
+}
+
+// Identificação curta do vínculo (internato/disciplina • período • unidade • local • setor).
+export function identificacaoVinculoLinha(r) {
+  if (!r) return 'Vínculo';
+  const partes = [];
+  const base = (r.internato_nome && r.internato_nome !== '-') ? r.internato_nome : (r.disciplina_nome && r.disciplina_nome !== '-' ? r.disciplina_nome : '');
+  if (base) partes.push(base);
+  if (r.periodo_nome) partes.push(r.periodo_nome);
+  if (r.unidade_nome && r.unidade_nome !== '-') partes.push(r.unidade_nome);
+  if (r.local_nome) partes.push(r.local_nome);
+  if (r.setor_nome) partes.push(r.setor_nome);
+  return partes.length ? partes.join(' • ') : 'Vínculo';
+}
+
+// Ranking "Utilização do saldo semestral" (gráfico do Dashboard e exportações).
+// Regras:
+//   • só entram vínculos com saldo informado (nunca usa preceptores.valor_inicial);
+//   • ordenação decrescente por percentual utilizado;
+//   • sempre aparecem os `limite` maiores e, além deles, todos os vínculos
+//     acima de 80% ou com saldo esgotado;
+//   • vínculos sem saldo não entram no ranking — são apenas contados.
+export function montarRankingSaldoVinculos(rows, mapa, limite = 10) {
+  const topo = Math.max(1, Number(limite) || 10);
+  const porChave = new Map();
+  (rows || []).forEach(r => {
+    const k = chaveVinculoLinha(r);
+    if (!k || porChave.has(k)) return;
+    porChave.set(k, {
+      chave: k,
+      preceptor_id: r.preceptor_id || null,
+      preceptor: r.preceptor_nome || 'Preceptor',
+      vinculo: identificacaoVinculoLinha(r)
+    });
+  });
+  const comSaldo = [], semSaldo = [];
+  porChave.forEach(item => {
+    const resumo = resumoSaldoVinculos([item.chave], mapa);
+    if (!resumo.temSaldo) { semSaldo.push(item); return; }
+    comSaldo.push({
+      ...item, ...resumo,
+      acima80: resumo.percentual > 80,
+      esgotado: arred2Saldo(resumo.disponivel) <= 0
+    });
+  });
+  comSaldo.sort((a, b) => (b.percentual || 0) - (a.percentual || 0));
+  const principais = comSaldo.slice(0, topo);
+  const destaques = comSaldo.slice(topo).filter(i => i.acima80 || i.esgotado);
+  return {
+    itens: [...principais, ...destaques],
+    totalComSaldo: comSaldo.length,
+    acima80: comSaldo.filter(i => i.acima80).length,
+    esgotados: comSaldo.filter(i => i.esgotado).length,
+    semSaldoQtd: semSaldo.length,
+    semSaldoNomes: [...new Set(semSaldo.map(i => i.preceptor))]
+  };
+}
+
+// Valores de saldo das exportações (Excel e PDF) — sempre os mesmos da lista.
+// semSaldo: texto exato "Saldo não informado"; percentual null → exibir "—".
+export function valoresSaldoExport(resumo) {
+  const r = resumo || resumoSaldoVinculos([], new Map());
+  const semSaldo = 'Saldo não informado';
+  return {
+    saldoInicial: r.temSaldo ? r.saldoInicial : semSaldo,
+    utilizado: r.utilizado,
+    pago: r.pago,
+    disponivel: r.temSaldo ? r.disponivel : semSaldo,
+    percentual: r.temSaldo ? r.percentual : null
+  };
 }
 
 export async function registrarSolicitacaoNota(calculoId, situacao = 'preparada') {
@@ -2513,3 +3369,1192 @@ export async function registrarSolicitacaoNota(calculoId, situacao = 'preparada'
   if (error) throw error;
   return data;
 }
+
+// ── Controle Unificado de Nota Fiscal (Parte 11A / 11B) ──
+
+export async function fetchSolicitacoesNotaFiscal({ preceptorId, competencia } = {}) {
+  let query = supabase.from('solicitacoes_nota_fiscal').select('*');
+  if (preceptorId) query = query.eq('preceptor_id', preceptorId);
+  if (competencia) query = query.eq('competencia', competencia);
+  const { data, error } = await query;
+  if (error) {
+    console.warn('Erro ao consultar solicitacoes_nota_fiscal:', error);
+    throw new Error('Não foi possível carregar a situação fiscal. Verifique a conexão e tente novamente.');
+  }
+  return data || [];
+}
+
+const SITUACOES_AVANCADAS_NOTA = ['solicitada', 'nota_recebida', 'em_pagamento', 'pago'];
+
+export async function prepararSolicitacaoNotaUnificada({
+  preceptorId,
+  competencia,
+  calculoIds,
+  valorTotal,
+  situacao = 'preparada',
+  identificacaoFiscal = {},
+  emailUsado = '',
+  assunto = null,
+  corpo = null,
+  demonstrativoNome = null
+}) {
+  // Busca a solicitação existente para evitar duplicidade e preservar situação avançada.
+  const { data: existentes } = await supabase
+    .from('solicitacoes_nota_fiscal')
+    .select('id, situacao, preparado_em, created_at')
+    .eq('preceptor_id', preceptorId)
+    .eq('competencia', competencia)
+    .order('updated_at', { ascending: false })
+    .order('created_at', { ascending: false });
+
+  const solExistente = Array.isArray(existentes) && existentes.length > 0 ? existentes[0] : null;
+
+  // Se já foi enviada/recebida/paga, re-preparar NÃO rebaixa a situação em silêncio.
+  let situacaoEfetiva = situacao;
+  if (solExistente && SITUACOES_AVANCADAS_NOTA.includes(solExistente.situacao) && situacao === 'preparada') {
+    situacaoEfetiva = solExistente.situacao;
+  }
+
+  try {
+    const { data, error } = await supabase.rpc('preparar_ou_atualizar_solicitacao_nota', {
+      p_preceptor_id: preceptorId,
+      p_competencia: competencia,
+      p_calculo_ids: calculoIds,
+      p_valor_total: valorTotal,
+      p_situacao: situacaoEfetiva,
+      p_identificacao_fiscal: identificacaoFiscal,
+      p_email_usado: emailUsado,
+      p_assunto: assunto,
+      p_corpo: corpo,
+      p_demonstrativo_nome: demonstrativoNome
+    });
+    if (!error && data) return data;
+  } catch (rpcErr) {
+    console.warn('Fallback para RPC unificada de solicitação de nota:', rpcErr);
+  }
+
+  const now = new Date().toISOString();
+  const payload = {
+    preceptor_id: preceptorId,
+    competencia: competencia,
+    email_usado: emailUsado,
+    situacao: situacaoEfetiva,
+    assunto: assunto,
+    corpo: corpo,
+    demonstrativo_nome: demonstrativoNome,
+    valor_total_solicitado: valorTotal || 0,
+    qtd_atuacoes: (calculoIds || []).length,
+    identificacao_fiscal: identificacaoFiscal || {},
+    updated_at: now
+  };
+
+  let solicitacaoId = solExistente?.id;
+  if (!solicitacaoId) {
+    payload.preparado_em = now;
+    const { data: inserted, error: insertErr } = await supabase
+      .from('solicitacoes_nota_fiscal')
+      .insert(payload)
+      .select('id')
+      .single();
+    if (insertErr) {
+      // Corrida: outra preparação criou a linha — reutiliza a existente.
+      const { data: retry } = await supabase
+        .from('solicitacoes_nota_fiscal')
+        .select('id, situacao')
+        .eq('preceptor_id', preceptorId)
+        .eq('competencia', competencia)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!retry) throw insertErr;
+      solicitacaoId = retry.id;
+      const { error: updateErr } = await supabase
+        .from('solicitacoes_nota_fiscal')
+        .update(payload)
+        .eq('id', solicitacaoId);
+      if (updateErr) throw updateErr;
+    } else {
+      solicitacaoId = inserted.id;
+    }
+  } else {
+    const { error: updateErr } = await supabase
+      .from('solicitacoes_nota_fiscal')
+      .update(payload)
+      .eq('id', solicitacaoId);
+    if (updateErr) throw updateErr;
+  }
+
+  try {
+    await supabase.from('solicitacao_nota_fiscal_eventos').insert({
+      solicitacao_id: solicitacaoId,
+      calculo_id: (calculoIds && calculoIds[0]) || null,
+      situacao_anterior: solExistente?.situacao || 'nao_solicitada',
+      situacao_nova: situacaoEfetiva,
+      ocorrido_em: now,
+      detalhes: { preceptor_id: preceptorId, competencia, valor_total: valorTotal, qtd_atuacoes: (calculoIds || []).length, origem: 'preparar_email_outlook' }
+    });
+  } catch (evErr) {}
+
+  return { sucesso: true, id: solicitacaoId, situacao: situacaoEfetiva };
+}
+
+function ehErroTecnicoNaoExpor(error) {
+  const msg = String((error && error.message) || error || '');
+  return /constraint|violates|foreign key|syntax error|relation |column |sqlstate|PGRST\d+|\b23503\b|\b23505\b|\b42703\b|\b42P01\b/i.test(msg);
+}
+
+export function mensagemErroAmigavel(error, fallback = 'Não foi possível concluir a operação. Tente novamente.') {
+  if (!error) return fallback;
+  let msg = typeof error === 'string' ? error : String(error.message || '');
+  msg = msg.replace(/^public\.[a-z_0-9]+\([^)]*\):\s*/i, '').trim();
+  if (!msg) return fallback;
+  if (ehErroTecnicoNaoExpor(msg)) return fallback;
+  return msg;
+}
+
+async function resolverProfileIdAtual() {
+  try {
+    const { data: authData } = await supabase.auth.getUser();
+    const userId = authData?.user?.id;
+    if (!userId) return null;
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('ativo', true)
+      .maybeSingle();
+    return profile?.id || null;
+  } catch (e) {
+    console.warn('[resolverProfileIdAtual]', e);
+    return null;
+  }
+}
+
+function rpcNaoDisponivel(error) {
+  if (!error) return false;
+  if (error.code === 'PGRST202') return true;
+  return /could not find the function/i.test(String(error.message || ''));
+}
+
+export async function confirmarEnvioSolicitacaoNota(solicitacaoId) {
+  const now = new Date().toISOString();
+  const { data: sol, error: solErr } = await supabase
+    .from('solicitacoes_nota_fiscal')
+    .select('*')
+    .eq('id', solicitacaoId)
+    .single();
+  if (solErr || !sol) throw new Error('Solicitação de nota fiscal não encontrada.');
+
+  if (sol.situacao !== 'preparada') {
+    throw new Error(`Somente solicitações no estado "preparada" podem ser confirmadas. Estado atual: ${sol.situacao}`);
+  }
+
+  // Caminho transacional: o servidor resolve o responsável a partir de auth.uid()
+  // (profiles.id) e grava situação, data, responsável e histórico na mesma transação.
+  const { data: rpcData, error: rpcError } = await supabase.rpc('confirmar_envio_solicitacao_nota', {
+    p_solicitacao_id: solicitacaoId
+  });
+  if (!rpcError && rpcData) {
+    return { sucesso: true, id: solicitacaoId, situacao: 'solicitada', ...rpcData };
+  }
+  if (rpcError && !rpcNaoDisponivel(rpcError)) {
+    throw new Error(mensagemErroAmigavel(rpcError, 'Não foi possível confirmar o envio da solicitação. Tente novamente.'));
+  }
+
+  // Fallback (RPC indisponível): nunca confiar em ID enviado pelo frontend.
+  const profileId = await resolverProfileIdAtual();
+  if (!profileId) {
+    throw new Error('Não foi possível identificar o usuário autenticado. Saia do sistema e entre novamente.');
+  }
+
+  const { error: updateErr } = await supabase
+    .from('solicitacoes_nota_fiscal')
+    .update({ situacao: 'solicitada', enviado_por: profileId, enviado_em: now, updated_at: now })
+    .eq('id', solicitacaoId);
+  if (updateErr) {
+    throw new Error(mensagemErroAmigavel(updateErr, 'Não foi possível confirmar o envio da solicitação. Tente novamente.'));
+  }
+
+  const { error: eventoErr } = await supabase.from('solicitacao_nota_fiscal_eventos').insert({
+    solicitacao_id: solicitacaoId,
+    situacao_anterior: 'preparada',
+    situacao_nova: 'solicitada',
+    ocorrido_em: now,
+    realizado_por: profileId,
+    detalhes: { acao: 'confirmar_envio_humano', valor_total: sol.valor_total_solicitado }
+  });
+
+  if (eventoErr) {
+    // Rollback manual: evita deixar a solicitação parcialmente atualizada.
+    await supabase
+      .from('solicitacoes_nota_fiscal')
+      .update({
+        situacao: sol.situacao,
+        enviado_por: sol.enviado_por ?? null,
+        enviado_em: sol.enviado_em ?? null,
+        updated_at: sol.updated_at
+      })
+      .eq('id', solicitacaoId);
+    throw new Error('Não foi possível registrar o histórico da confirmação. Nenhuma alteração foi mantida. Tente novamente.');
+  }
+
+  return { sucesso: true, id: solicitacaoId, situacao: 'solicitada', enviado_por: profileId, enviado_em: now };
+}
+
+export async function corrigirConfirmacaoEnvioNota(solicitacaoId, motivo, profileId = null) {
+  if (!motivo || motivo.trim().length < 3) {
+    throw new Error('Por favor, informe um motivo válido para a correção (mínimo 3 caracteres).');
+  }
+
+  const now = new Date().toISOString();
+  const { data: sol, error: solErr } = await supabase
+    .from('solicitacoes_nota_fiscal')
+    .select('*')
+    .eq('id', solicitacaoId)
+    .single();
+  if (solErr || !sol) throw new Error('Solicitação de nota fiscal não encontrada.');
+
+  if (sol.situacao !== 'solicitada') {
+    throw new Error(`Não é possível corrigir confirmação. A solicitação não está no estado "solicitada". Estado atual: ${sol.situacao}`);
+  }
+
+  const { error: updateErr } = await supabase
+    .from('solicitacoes_nota_fiscal')
+    .update({ situacao: 'preparada', updated_at: now })
+    .eq('id', solicitacaoId);
+  if (updateErr) throw updateErr;
+
+  try {
+    await supabase.from('solicitacao_nota_fiscal_eventos').insert({
+      solicitacao_id: solicitacaoId,
+      situacao_anterior: 'solicitada',
+      situacao_nova: 'preparada',
+      ocorrido_em: now,
+      motivo: motivo.trim(),
+      detalhes: { acao: 'corrigir_confirmacao_envio', motivo: motivo.trim() }
+    });
+  } catch (e) {}
+
+  return { sucesso: true, id: solicitacaoId, situacao: 'preparada' };
+}
+
+export async function registrarRecebimentoNotaFiscal({
+  solicitacaoId,
+  profileId = null,
+  numeroNota = '',
+  dataEmissao = null,
+  dataRecebimento = null,
+  valorInformado,
+  observacao = '',
+  divergencia = false,
+  registrarDivergencia,
+  motivoDivergencia = ''
+}) {
+  // aceita tanto `divergencia` (chamada do App.jsx) quanto `registrarDivergencia` (legacy)
+  const usarDivergencia = divergencia || registrarDivergencia || false;
+  if (!valorInformado || Number(valorInformado) <= 0) {
+    throw new Error('Por favor, informe o valor da nota fiscal recebida.');
+  }
+
+  const now = new Date().toISOString();
+  const { data: sol, error: solErr } = await supabase
+    .from('solicitacoes_nota_fiscal')
+    .select('*')
+    .eq('id', solicitacaoId)
+    .single();
+  if (solErr || !sol) throw new Error('Solicitação de nota fiscal não encontrada.');
+
+  if (sol.situacao !== 'solicitada') {
+    throw new Error(`Somente solicitações em estado "Solicitação enviada" podem ser registradas como recebidas. Estado atual: ${sol.situacao}`);
+  }
+
+  const temDivergencia = Math.abs(Number(valorInformado) - Number(sol.valor_total_solicitado)) > 0.001;
+  if (temDivergencia && !usarDivergencia) {
+    throw new Error(`O valor informado (R$ ${valorInformado}) difere do valor solicitado (R$ ${sol.valor_total_solicitado}). Confirmação necessária.`);
+  }
+  if (temDivergencia && (!motivoDivergencia || motivoDivergencia.trim().length < 3)) {
+    throw new Error('Por favor, informe o motivo da divergência (mínimo 3 caracteres).');
+  }
+
+  const payload = {
+    situacao: 'nota_recebida',
+    numero_nota: numeroNota?.trim() || null,
+    data_emissao_nota: dataEmissao || null,
+    nota_recebida_em: dataRecebimento || now,
+    valor_nota_informado: Number(valorInformado),
+    observacao: observacao?.trim() || null,
+    divergencia_valor: temDivergencia,
+    motivo_divergencia: temDivergencia ? motivoDivergencia.trim() : null,
+    updated_at: now
+  };
+
+  const { error: updateErr } = await supabase
+    .from('solicitacoes_nota_fiscal')
+    .update(payload)
+    .eq('id', solicitacaoId);
+  if (updateErr) throw updateErr;
+
+  try {
+    await supabase.from('solicitacao_nota_fiscal_eventos').insert({
+      solicitacao_id: solicitacaoId,
+      situacao_anterior: 'solicitada',
+      situacao_nova: 'nota_recebida',
+      ocorrido_em: dataRecebimento || now,
+      realizado_por: profileId,
+      motivo: temDivergencia ? motivoDivergencia.trim() : null,
+      detalhes: {
+        acao: 'registrar_nota_recebida',
+        numero_nota: numeroNota,
+        valor_solicitado: sol.valor_total_solicitado,
+        valor_informado: Number(valorInformado),
+        divergencia: temDivergencia
+      }
+    });
+  } catch (e) {}
+
+  return { sucesso: true, id: solicitacaoId, situacao: 'nota_recebida', divergencia: temDivergencia };
+}
+
+export async function fetchHistoricoSolicitacaoNota(solicitacaoId) {
+  const { data: eventos, error } = await supabase
+    .from('solicitacao_nota_fiscal_eventos')
+    .select('*')
+    .eq('solicitacao_id', solicitacaoId)
+    .order('ocorrido_em', { ascending: true });
+  if (error) throw error;
+
+  const profileIds = [...new Set((eventos || []).map(e => e.realizado_por).filter(Boolean))];
+  let profileMap = {};
+  if (profileIds.length) {
+    const { data: profiles } = await supabase.from('profiles').select('id,nome_completo').in('id', profileIds);
+    profileMap = Object.fromEntries((profiles || []).map(p => [p.id, p.nome_completo || '']));
+  }
+
+  return (eventos || []).map(e => ({
+    id: e.id,
+    tipo_evento: e.situacao_nova || e.tipo_evento || 'evento',
+    situacao_anterior: e.situacao_anterior,
+    situacao_nova: e.situacao_nova,
+    ocorrido_em: e.ocorrido_em,
+    criado_em: e.ocorrido_em,
+    motivo: e.motivo,
+    observacao: e.motivo || (e.detalhes?.motivo) || null,
+    usuario_nome: profileMap[e.realizado_por] || 'Sistema/Administrador',
+    realizado_por_nome: profileMap[e.realizado_por] || 'Sistema/Administrador',
+    detalhes: e.detalhes || {}
+  }));
+}
+
+export async function fetchDatasPagamentos() {
+  const { data, error } = await supabase
+    .from('solicitacao_nota_fiscal_eventos')
+    .select('solicitacao_id, ocorrido_em, detalhes')
+    .eq('situacao_nova', 'pago')
+    .order('ocorrido_em', { ascending: false });
+  if (error) {
+    console.warn('[fetchDatasPagamentos]', error);
+    return {};
+  }
+  const mapa = {};
+  (data || []).forEach(e => {
+    if (!e.solicitacao_id || mapa[e.solicitacao_id]) return;
+    const candidatos = [e.detalhes?.data_pagamento, e.ocorrido_em].filter(Boolean);
+    for (const c of candidatos) {
+      const d = new Date(c);
+      if (!isNaN(d.getTime())) { mapa[e.solicitacao_id] = c; break; }
+    }
+  });
+  return mapa;
+}
+
+export async function registrarPagamentoDireto({
+  solicitacaoId,
+  valorPago,
+  dataPagamento = null,
+  observacao = '',
+  profileId = null
+}) {
+  if (!solicitacaoId) throw new Error('ID da solicitação fiscal é obrigatório.');
+  if (!valorPago || Number(valorPago) <= 0) throw new Error('Informe um valor de pagamento válido.');
+
+  const now = new Date().toISOString();
+  const { data: sol, error: solErr } = await supabase
+    .from('solicitacoes_nota_fiscal')
+    .select('*')
+    .eq('id', solicitacaoId)
+    .single();
+  if (solErr || !sol) throw new Error('Solicitação de nota fiscal não encontrada.');
+  if (sol.situacao === 'pago') throw new Error('Pagamento já registrado para esta solicitação.');
+  if (sol.situacao !== 'nota_recebida' && sol.situacao !== 'em_pagamento') {
+    throw new Error(`Somente solicitações com nota recebida podem ser marcadas como pagas. Estado atual: ${sol.situacao}`);
+  }
+
+  const { error: updateErr } = await supabase
+    .from('solicitacoes_nota_fiscal')
+    .update({ situacao: 'pago', updated_at: now })
+    .eq('id', solicitacaoId);
+  if (updateErr) throw updateErr;
+
+  try {
+    await supabase.from('solicitacao_nota_fiscal_eventos').insert({
+      solicitacao_id: solicitacaoId,
+      situacao_anterior: sol.situacao,
+      situacao_nova: 'pago',
+      ocorrido_em: now,
+      realizado_por: profileId,
+      motivo: observacao?.trim() || null,
+      detalhes: {
+        acao: 'registrar_pagamento',
+        valor_pago: Number(valorPago),
+        data_pagamento: dataPagamento || now.slice(0, 10),
+        observacao: observacao?.trim() || null
+      }
+    });
+  } catch (e) {}
+
+  return { sucesso: true, id: solicitacaoId, situacao: 'pago' };
+}
+
+
+export async function previaRefazerFluxo(competenciaId, preceptorId = null, tipoAtuacao = null, vinculoAdmId = null, vinculoInternatoId = null) {
+  const params = { p_competencia_id: competenciaId };
+  if (preceptorId) params.p_preceptor_id = preceptorId;
+  if (tipoAtuacao) params.p_tipo_atuacao = tipoAtuacao;
+  if (vinculoAdmId) params.p_vinculo_adm_id = vinculoAdmId;
+  if (vinculoInternatoId) params.p_vinculo_internato_id = vinculoInternatoId;
+  const { data, error } = await supabase.rpc('previa_refazer_fluxo', params);
+  if (error) throw error;
+  return data;
+}
+
+export async function refazerFluxoCompetencia(competenciaId, preceptorId = null, tipoAtuacao = null, vinculoAdmId = null, vinculoInternatoId = null, confirmar = false) {
+  const params = { p_competencia_id: competenciaId, p_confirmar: confirmar };
+  if (preceptorId) params.p_preceptor_id = preceptorId;
+  if (tipoAtuacao) params.p_tipo_atuacao = tipoAtuacao;
+  if (vinculoAdmId) params.p_vinculo_adm_id = vinculoAdmId;
+  if (vinculoInternatoId) params.p_vinculo_internato_id = vinculoInternatoId;
+  const { data, error } = await supabase.rpc('refazer_fluxo_competencia', params);
+  if (error) throw error;
+  return data;
+}
+
+export async function previaRefazerVinculo({ vinculoAdmId = null, vinculoInternatoId = null } = {}) {
+  const params = {};
+  if (vinculoAdmId) params.p_vinculo_adm_id = vinculoAdmId;
+  if (vinculoInternatoId) params.p_vinculo_internato_id = vinculoInternatoId;
+  const { data, error } = await supabase.rpc('previa_refazer_vinculo', params);
+  if (error) throw error;
+  return data;
+}
+
+export async function refazerVinculo({ vinculoAdmId = null, vinculoInternatoId = null, confirmar = false } = {}) {
+  const params = { p_confirmar: confirmar };
+  if (vinculoAdmId) params.p_vinculo_adm_id = vinculoAdmId;
+  if (vinculoInternatoId) params.p_vinculo_internato_id = vinculoInternatoId;
+  const { data, error } = await supabase.rpc('refazer_vinculo', params);
+  if (error) throw error;
+  return data;
+}
+
+export async function previaExcluirVinculo({ vinculoAdmId = null, vinculoInternatoId = null } = {}) {
+  const params = {};
+  if (vinculoAdmId) params.p_vinculo_adm_id = vinculoAdmId;
+  if (vinculoInternatoId) params.p_vinculo_internato_id = vinculoInternatoId;
+  const { data, error } = await supabase.rpc('previa_excluir_vinculo', params);
+  if (error) throw error;
+  return data;
+}
+
+export async function excluirVinculo({ vinculoAdmId = null, vinculoInternatoId = null, confirmar = false } = {}) {
+  const params = { p_confirmar: confirmar };
+  if (vinculoAdmId) params.p_vinculo_adm_id = vinculoAdmId;
+  if (vinculoInternatoId) params.p_vinculo_internato_id = vinculoInternatoId;
+  const { data, error } = await supabase.rpc('excluir_vinculo', params);
+  if (error) throw error;
+  return data;
+}
+
+export async function previaExcluirPreceptor(preceptorId) {
+  const { data, error } = await supabase.rpc('previa_excluir_preceptor', { p_preceptor_id: preceptorId });
+  if (error) throw error;
+  return data;
+}
+
+export async function excluirPreceptor(preceptorId, { confirmar = false } = {}) {
+  const { data, error } = await supabase.rpc('excluir_preceptor', {
+    p_preceptor_id: preceptorId,
+    p_confirmar: confirmar
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function fetchPresencasPorVinculo({ preceptorId, vinculoInternatoId, mes, ano }) {
+  const dataInicio = `${ano}-${String(mes).padStart(2, '0')}-01`;
+  const ultimoDia = new Date(ano, mes, 0).getDate();
+  const dataFim = `${ano}-${String(mes).padStart(2, '0')}-${String(ultimoDia).padStart(2, '0')}`;
+  const { data, error } = await supabase
+    .from('presencas')
+    .select('id, data_presenca, turno, status, local:locais(nome), setor:setores(nome)')
+    .eq('preceptor_id', preceptorId)
+    .eq('vinculo_internato_id', vinculoInternatoId)
+    .neq('status', 'cancelada')
+    .gte('data_presenca', dataInicio)
+    .lte('data_presenca', dataFim)
+    .order('data_presenca', { ascending: true })
+    .order('turno', { ascending: true });
+  if (error) throw error;
+  return (data || []).map(p => ({
+    ...p,
+    local_nome: p.local?.nome || '',
+    setor_nome: p.setor?.nome || ''
+  }));
+}
+
+/**
+ * Parte 9A: PDF-FINANCEIRO-9A
+ * Fonte de dados unificada para o Demonstrativo Financeiro por Preceptor e Competência.
+ *
+ * Regra: Um único demonstrativo por preceptor e competência, agregando todas as atuações elegíveis.
+ * Critérios de elegibilidade da atuação (fluxo simplificado — sem exigência de revisão):
+ * 1. Pertencer ao mesmo preceptor e competência
+ * 2. Estar calculada (status === 'calculado') com valor calculado
+ * 3. Estar atualizada (sem presenças registradas/alteradas após a apuração)
+ *
+ * Revisão financeira (quando existir) é apenas conferência visual e NÃO bloqueia PDF/e-mail.
+ *
+ * @param {Object|string} params - { preceptorId, competenciaId } ou preceptorId diretamente
+ * @param {string} [paramCompetenciaId] - competenciaId caso params seja string
+ * @returns {Promise<Object>} { identificacaoFiscal (cadastro principal; usada por PDF/listas), competenciaInfo, atuacoesElegiveis (cada atuação com `identificacao` fiscal do vínculo; usada pelo e-mail), valorTotalGeral, impedimentos }
+ */
+export async function montarDadosDemonstrativoFinanceiro(params, paramCompetenciaId) {
+  let preceptorId, competenciaId;
+  if (typeof params === 'object' && params !== null) {
+    preceptorId = params.preceptorId || params.preceptor_id;
+    competenciaId = params.competenciaId || params.competencia_id;
+  } else {
+    preceptorId = params;
+    competenciaId = paramCompetenciaId;
+  }
+
+  if (!preceptorId || !competenciaId) {
+    throw new Error('preceptorId e competenciaId são obrigatórios para montar os dados do demonstrativo.');
+  }
+
+  // 1. Dados cadastrais do Preceptor (cadastro principal: nome, CPF, profissão, conselho).
+  //    Modalidade/CNPJ/razão social da identificação fiscal vêm do vínculo de cada cálculo (passo 3).
+  const { data: preceptor, error: precErr } = await supabase
+    .from('preceptores')
+    .select('id, nome_completo, cpf, cnpj, razao_social, conselho_tipo, conselho_numero, email, profissao, profissao_ref:profissoes!preceptores_profissao_id_fkey(nome), modalidade_ref:modalidades_pagamento!preceptores_modalidade_pagamento_id_fkey(nome)')
+    .eq('id', preceptorId)
+    .single();
+
+  if (precErr || !preceptor) {
+    throw new Error(`Preceptor não encontrado (${preceptorId}).`);
+  }
+
+  const profissaoNome = preceptor.profissao_ref?.nome || preceptor.profissao || '';
+  // Identificação única do cadastro principal — usada pelo PDF, listas e pelo registro
+  // da solicitação. O e-mail usa a identificação fiscal por vínculo (`identificacao`
+  // em cada atuação), montada no passo 3 do laço de cálculos.
+  const temCnpj = Boolean(preceptor.cnpj && preceptor.cnpj.trim());
+  const identificacaoFiscal = temCnpj ? {
+    tipo_identificacao: 'PJ',
+    razao_social: preceptor.razao_social?.trim() || preceptor.nome_completo,
+    cnpj: preceptor.cnpj.trim(),
+    conselho_numero: preceptor.conselho_numero || '',
+    conselho_tipo: preceptor.conselho_tipo || '',
+    profissao: profissaoNome,
+    nome: preceptor.nome_completo,
+    cpf: null
+  } : {
+    tipo_identificacao: 'PF',
+    nome: preceptor.nome_completo,
+    cpf: preceptor.cpf?.trim() || '',
+    conselho_numero: preceptor.conselho_numero || '',
+    conselho_tipo: preceptor.conselho_tipo || '',
+    profissao: profissaoNome,
+    razao_social: null,
+    cnpj: null
+  };
+
+  // 2. Informações da Competência
+  const { data: comp, error: compErr } = await supabase
+    .from('competencias')
+    .select('id, ano, mes, data_inicio, data_fim, status')
+    .eq('id', competenciaId)
+    .single();
+
+  if (compErr || !comp) {
+    throw new Error(`Competência não encontrada (${competenciaId}).`);
+  }
+
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const ultimoDia = new Date(comp.ano, comp.mes, 0).getDate();
+  const dataInicioFormated = `01/${pad2(comp.mes)}/${comp.ano}`;
+  const dataFimFormated = `${pad2(ultimoDia)}/${pad2(comp.mes)}/${comp.ano}`;
+
+  const competenciaInfo = {
+    competencia_id: comp.id,
+    mes: comp.mes,
+    ano: comp.ano,
+    rotulo: apuracaoMesLabel(comp.mes, comp.ano),
+    periodo_considerado: `${dataInicioFormated} a ${dataFimFormated}`
+  };
+
+  // 3. Buscar todos os cálculos do preceptor na competência
+  const { data: calculos, error: calcErr } = await supabase
+    .from('calculos')
+    .select(`
+      id, competencia_id, preceptor_id, tipo_atuacao, status,
+      total_bruto, total_descontos, total_liquido, versao, calculado_em,
+      quantidade_presencas, vinculo_adm_id, vinculo_internato_id
+    `)
+    .eq('preceptor_id', preceptorId)
+    .eq('competencia_id', competenciaId)
+    .order('created_at', { ascending: true });
+
+  if (calcErr) throw calcErr;
+
+  const atuacoesElegiveis = [];
+  const impedimentos = [];
+
+  const dataInicioStr = `${comp.ano}-${String(comp.mes).padStart(2, '0')}-01`;
+  const dataFimStr = `${comp.ano}-${String(comp.mes).padStart(2, '0')}-${String(ultimoDia).padStart(2, '0')}`;
+
+  for (const calc of (calculos || [])) {
+    const calcId = calc.id;
+    const tipoAtuacao = calc.tipo_atuacao || (calc.vinculo_internato_id ? 'internato' : 'adm');
+
+    // Rótulo da atuação para mensagens de impedimento específicas (não genéricas)
+    let rotuloAtuacao = tipoAtuacao === 'internato' ? 'Internato' : 'Prática';
+    try {
+      if (tipoAtuacao === 'internato' && calc.vinculo_internato_id) {
+        const { data: vRot } = await supabase
+          .from('vinculos_internato')
+          .select('internato:internatos(nome), periodo:periodos(numero, nome), local:locais(nome)')
+          .eq('id', calc.vinculo_internato_id)
+          .maybeSingle();
+        const partes = [
+          vRot?.internato?.nome,
+          vRot?.periodo?.nome || (vRot?.periodo?.numero ? `${vRot.periodo.numero}º período` : null),
+          vRot?.local?.nome
+        ].filter(Boolean);
+        if (partes.length) rotuloAtuacao = partes.join(' · ');
+      } else if (tipoAtuacao === 'adm' && calc.vinculo_adm_id) {
+        const { data: vRot } = await supabase
+          .from('vinculos_adm')
+          .select('disciplina:disciplinas(nome), periodo:periodos(numero, nome), local:locais(nome)')
+          .eq('id', calc.vinculo_adm_id)
+          .maybeSingle();
+        const partes = [
+          vRot?.disciplina?.nome,
+          vRot?.periodo?.nome || (vRot?.periodo?.numero ? `${vRot.periodo.numero}º período` : null),
+          vRot?.local?.nome
+        ].filter(Boolean);
+        if (partes.length) rotuloAtuacao = partes.join(' · ');
+      }
+    } catch (_) { /* rótulo é opcional */ }
+
+    // A) Verificar status do cálculo
+    if (calc.status !== 'calculado') {
+      impedimentos.push({
+        calculo_id: calcId,
+        atuacao: rotuloAtuacao,
+        motivo: `Atuação "${rotuloAtuacao}": cálculo com status '${calc.status}', aguardando apuração final.`
+      });
+      continue;
+    }
+
+    // A2) Valor calculado deve existir (pode ser 0 apenas se a apuração retornou valor explícito)
+    if (calc.total_bruto === null || calc.total_bruto === undefined || calc.total_liquido === null || calc.total_liquido === undefined) {
+      impedimentos.push({
+        calculo_id: calcId,
+        atuacao: rotuloAtuacao,
+        motivo: `Atuação "${rotuloAtuacao}": cálculo sem valor calculado. Recalcule a competência.`
+      });
+      continue;
+    }
+
+    // B) Buscar presenças do vínculo nesta competência
+    let presQuery = supabase
+      .from('presencas')
+      .select('id, data_presenca, turno, status, registrado_em, updated_at, local:locais(id, nome), setor:setores(id, nome)')
+      .eq('preceptor_id', preceptorId)
+      .neq('status', 'cancelada')
+      .gte('data_presenca', dataInicioStr)
+      .lte('data_presenca', dataFimStr)
+      .order('data_presenca', { ascending: true })
+      .order('turno', { ascending: true });
+
+    if (tipoAtuacao === 'adm' && calc.vinculo_adm_id) {
+      presQuery = presQuery.eq('vinculo_adm_id', calc.vinculo_adm_id);
+    } else if (tipoAtuacao === 'internato' && calc.vinculo_internato_id) {
+      presQuery = presQuery.eq('vinculo_internato_id', calc.vinculo_internato_id);
+    }
+
+    const { data: presencas } = await presQuery;
+    const presencasData = presencas || [];
+
+    // C) Verificar desatualização
+    const calcTime = new Date(calc.calculado_em).getTime();
+    const desatualizado = presencasData.some(p => {
+      const regTime = p.registrado_em ? new Date(p.registrado_em).getTime() : 0;
+      const updTime = p.updated_at ? new Date(p.updated_at).getTime() : 0;
+      return Math.max(regTime, updTime) > calcTime;
+    });
+
+    if (desatualizado) {
+      impedimentos.push({
+        calculo_id: calcId,
+        atuacao: rotuloAtuacao,
+        motivo: `Atuação "${rotuloAtuacao}": cálculo desatualizado. Existem presenças registradas ou alteradas após a apuração (${new Date(calc.calculado_em).toLocaleString('pt-BR')}). É necessário recalcular a competência.`
+      });
+      continue;
+    }
+
+    // D) Revisão financeira NÃO é exigida neste fluxo (apenas conferência visual, se existir).
+
+    // E) Se passou em todas as checagens, carregar os detalhes do vínculo e da regra
+    let vinculoCtx = null;
+    if (tipoAtuacao === 'adm' && calc.vinculo_adm_id) {
+      const { data: v } = await supabase
+        .from('vinculos_adm')
+        .select('periodo:periodos(numero, nome), unidade:unidades(nome), disciplina:disciplinas(nome), local:locais(nome), setor:setores(nome)')
+        .eq('id', calc.vinculo_adm_id)
+        .maybeSingle();
+      vinculoCtx = v;
+    } else if (tipoAtuacao === 'internato' && calc.vinculo_internato_id) {
+      const { data: v } = await supabase
+        .from('vinculos_internato')
+        .select('periodo:periodos(numero, nome), unidade:unidades(nome), internato:internatos(nome), local:locais(nome), setor:setores(nome), cnpj, razao_social, modalidade_ref:modalidades_pagamento!vinculos_internato_modalidade_pagamento_id_fkey(nome)')
+        .eq('id', calc.vinculo_internato_id)
+        .maybeSingle();
+      vinculoCtx = v;
+    }
+
+    let regraNome = '';
+    const vinculoTargetId = tipoAtuacao === 'adm' ? calc.vinculo_adm_id : calc.vinculo_internato_id;
+    if (vinculoTargetId) {
+      let rQuery = supabase
+        .from('vinculo_regras_financeiras')
+        .select('regra:regras_financeiras(nome)')
+        .eq('status', 'ativo');
+      if (tipoAtuacao === 'adm') {
+        rQuery = rQuery.eq('vinculo_adm_id', vinculoTargetId);
+      } else {
+        rQuery = rQuery.eq('vinculo_internato_id', vinculoTargetId);
+      }
+      const { data: vr } = await rQuery.limit(1).maybeSingle();
+      regraNome = vr?.regra?.nome || '';
+    }
+
+    const internatoOuDisciplina = vinculoCtx?.internato?.nome
+      || vinculoCtx?.disciplina?.nome
+      || (tipoAtuacao === 'internato' ? 'Internato' : 'Prática');
+
+    const periodoAcademico = vinculoCtx?.periodo?.nome
+      || (vinculoCtx?.periodo?.numero ? `${vinculoCtx.periodo.numero}º período` : '');
+
+    const unidadeNome = vinculoCtx?.unidade?.nome || null;
+    const localNome = vinculoCtx?.local?.nome || '';
+    const setorNome = vinculoCtx?.setor?.nome || '';
+
+    const presencasFormatadas = presencasData.map(p => ({
+      id: p.id,
+      data_presenca: p.data_presenca,
+      turno: p.turno,
+      local_nome: p.local?.nome || localNome,
+      setor_nome: p.setor?.nome || setorNome
+    }));
+
+    const valorAtuacao = Number(calc.total_bruto || calc.total_liquido || 0);
+
+    // Identificação fiscal desta atuação: modalidade/CNPJ/razão social consultados no
+    // vínculo relacionado ao cálculo (internato: vinculos_internato; prática: cadastro
+    // principal, única fonte de dados fiscais do vínculo adm). CPF e dados profissionais
+    // sempre do cadastro principal. PJ somente quando modalidade NFS e vínculo com CNPJ.
+    const modalidadeNome = (tipoAtuacao === 'internato'
+      ? (vinculoCtx?.modalidade_ref?.nome || '')
+      : (preceptor.modalidade_ref?.nome || ''));
+    const ehNfs = modalidadeNome.toLowerCase().includes('nfs');
+    const cnpjVinculo = (tipoAtuacao === 'internato'
+      ? (vinculoCtx?.cnpj || '')
+      : (preceptor.cnpj || ''));
+    const razaoVinculo = (tipoAtuacao === 'internato'
+      ? (vinculoCtx?.razao_social || '')
+      : (preceptor.razao_social || ''));
+    const temCnpjVinculo = Boolean(String(cnpjVinculo || '').trim());
+    const identificacaoAtuacao = (ehNfs && temCnpjVinculo) ? {
+      tipo_identificacao: 'PJ',
+      razao_social: String(razaoVinculo).trim(),
+      cnpj: String(cnpjVinculo).trim(),
+      profissao: profissaoNome,
+      conselho_numero: preceptor.conselho_numero || '',
+      conselho_tipo: preceptor.conselho_tipo || '',
+      nome: preceptor.nome_completo,
+      cpf: null
+    } : {
+      tipo_identificacao: 'PF',
+      nome: preceptor.nome_completo,
+      cpf: preceptor.cpf?.trim() || '',
+      profissao: profissaoNome,
+      conselho_numero: preceptor.conselho_numero || '',
+      conselho_tipo: preceptor.conselho_tipo || '',
+      razao_social: null,
+      cnpj: null
+    };
+
+    atuacoesElegiveis.push({
+      calculo_id: calcId,
+      tipo_atuacao: tipoAtuacao,
+      vinculo_adm_id: calc.vinculo_adm_id || null,
+      vinculo_internato_id: calc.vinculo_internato_id || null,
+      internato_ou_disciplina: internatoOuDisciplina,
+      periodo_academico: periodoAcademico,
+      unidade_nome: unidadeNome,
+      local_nome: localNome,
+      setor_nome: setorNome,
+      regra_financeira: regraNome,
+      presencas: presencasFormatadas,
+      total_turnos: presencasFormatadas.length || Number(calc.quantidade_presencas || 0),
+      valor_atuacao: valorAtuacao,
+      versao: calc.versao,
+      identificacao: identificacaoAtuacao
+    });
+  }
+
+  const valorTotalGeral = atuacoesElegiveis.reduce((acc, at) => acc + Number(at.valor_atuacao || 0), 0);
+
+  return {
+    identificacaoFiscal,
+    competenciaInfo,
+    atuacoesElegiveis,
+    valorTotalGeral,
+    impedimentos
+  };
+}
+
+// =====================================================================
+// ESTÁGIO 12A: CONTROLE E RPCS DE PAGAMENTO POR PRECEPTOR E COMPETÊNCIA
+// =====================================================================
+
+export async function iniciarPagamento({
+  solicitacaoId,
+  divergenciaAutorizada = false,
+  motivoDivergencia = '',
+  observacao = ''
+}) {
+  if (!solicitacaoId) {
+    throw new Error('ID da solicitação fiscal é obrigatório.');
+  }
+
+  try {
+    const { data, error } = await supabase.rpc('iniciar_pagamento', {
+      p_solicitacao_id: solicitacaoId,
+      p_divergencia_autorizada: Boolean(divergenciaAutorizada),
+      p_motivo_divergencia: motivoDivergencia?.trim() || null,
+      p_observacao: observacao?.trim() || null
+    });
+    if (!error && data) return data;
+    if (error) throw error;
+  } catch (rpcErr) {
+    console.warn('Erro ao chamar RPC iniciar_pagamento:', rpcErr);
+    throw rpcErr;
+  }
+}
+
+export async function concluirPagamento({
+  pagamentoId,
+  valorPago = null,
+  observacao = ''
+}) {
+  if (!pagamentoId) {
+    throw new Error('ID do pagamento é obrigatório.');
+  }
+
+  try {
+    const { data, error } = await supabase.rpc('concluir_pagamento', {
+      p_pagamento_id: pagamentoId,
+      p_valor_pago: valorPago !== null && valorPago !== undefined ? Number(valorPago) : null,
+      p_observacao: observacao?.trim() || null
+    });
+    if (!error && data) return data;
+    if (error) throw error;
+  } catch (rpcErr) {
+    console.warn('Erro ao chamar RPC concluir_pagamento:', rpcErr);
+    throw rpcErr;
+  }
+}
+
+export async function cancelarPagamento({
+  pagamentoId,
+  motivo = ''
+}) {
+  if (!pagamentoId) {
+    throw new Error('ID do pagamento é obrigatório.');
+  }
+  if (!motivo || motivo.trim().length < 5) {
+    throw new Error('Por favor, informe o motivo do cancelamento (mínimo 5 caracteres).');
+  }
+
+  try {
+    const { data, error } = await supabase.rpc('cancelar_pagamento', {
+      p_pagamento_id: pagamentoId,
+      p_motivo: motivo.trim()
+    });
+    if (!error && data) return data;
+    if (error) throw error;
+  } catch (rpcErr) {
+    console.warn('Erro ao chamar RPC cancelar_pagamento:', rpcErr);
+    throw rpcErr;
+  }
+}
+
+export async function buscarPagamentoPorSolicitacao(solicitacaoId) {
+  if (!solicitacaoId) return null;
+  const { data, error } = await supabase
+    .from('pagamentos')
+    .select(`
+      *,
+      pagamento_itens(*)
+    `)
+    .eq('solicitacao_id', solicitacaoId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function previaPagamentoLote(competenciaId, preceptorIds) {
+  if (!competenciaId) {
+    throw new Error('Competência é obrigatória para a prévia de pagamento em lote.');
+  }
+  const ids = Array.isArray(preceptorIds) ? preceptorIds.filter(Boolean) : [];
+  if (ids.length === 0) {
+    throw new Error('Selecione ao menos um preceptor para a prévia de pagamento em lote.');
+  }
+
+  try {
+    const { data, error } = await supabase.rpc('previa_pagamento_lote', {
+      p_competencia_id: competenciaId,
+      p_preceptor_ids: ids
+    });
+    if (error) throw error;
+    return data;
+  } catch (rpcErr) {
+    console.warn('Erro ao chamar RPC previa_pagamento_lote:', rpcErr);
+    throw rpcErr;
+  }
+}
+
+export async function executarPagamentoLote({
+  competenciaId,
+  preceptorIds,
+  dataPagamento,
+  observacao = ''
+}) {
+  if (!competenciaId) {
+    throw new Error('Competência é obrigatória para o pagamento em lote.');
+  }
+  const ids = Array.isArray(preceptorIds) ? preceptorIds.filter(Boolean) : [];
+  if (ids.length === 0) {
+    throw new Error('Selecione ao menos um preceptor para registrar o pagamento em lote.');
+  }
+  if (!dataPagamento) {
+    throw new Error('Informe a data do pagamento.');
+  }
+
+  try {
+    const { data, error } = await supabase.rpc('executar_pagamento_lote', {
+      p_competencia_id: competenciaId,
+      p_preceptor_ids: ids,
+      p_data_pagamento: dataPagamento,
+      p_observacao: observacao?.trim() || null
+    });
+    if (error) throw error;
+    return data;
+  } catch (rpcErr) {
+    console.warn('Erro ao chamar RPC executar_pagamento_lote:', rpcErr);
+    throw rpcErr;
+  }
+}
+
+export async function excluirEscala({
+  escalaId,
+  competenciaId,
+  profileId = null
+}) {
+  if (!escalaId || !competenciaId) {
+    throw new Error('ID da escala e competência são obrigatórios.');
+  }
+
+  const now = new Date().toISOString();
+
+  try {
+    const { data: escala, error: escalaErr } = await supabase
+      .from('escalas')
+      .select('*, escalas_itens(*)')
+      .eq('id', escalaId)
+      .single();
+
+    if (escalaErr || !escala) throw new Error('Escala não encontrada.');
+
+    const { data: competencia, error: compErr } = await supabase
+      .from('competencias')
+      .select('*')
+      .eq('id', competenciaId)
+      .single();
+
+    if (compErr || !competencia) throw new Error('Competência não encontrada.');
+
+    const itensNaCompetencia = (escala.escalas_itens || []).filter(item =>
+      item.data >= competencia.data_inicio && item.data <= competencia.data_fim
+    );
+
+    if (itensNaCompetencia.length === 0) {
+      throw new Error('Nenhum item da escala encontrado dentro da competência.');
+    }
+
+    const { error: delItensErr } = await supabase
+      .from('escalas_itens')
+      .delete()
+      .eq('escala_id', escalaId)
+      .gte('data', competencia.data_inicio)
+      .lte('data', competencia.data_fim);
+
+    if (delItensErr) throw delItensErr;
+
+    const { data: itensRestantes, error: itensRestErr } = await supabase
+      .from('escalas_itens')
+      .select('id')
+      .eq('escala_id', escalaId);
+
+    if (itensRestErr) throw itensRestErr;
+
+    if ((itensRestantes || []).length === 0) {
+      const { error: delEscalaErr } = await supabase
+        .from('escalas')
+        .delete()
+        .eq('id', escalaId);
+      if (delEscalaErr) throw delEscalaErr;
+    }
+
+    const { error: delPresencasErr } = await supabase
+      .from('presencas')
+      .delete()
+      .eq('escala_id', escalaId)
+      .gte('data_presenca', competencia.data_inicio)
+      .lte('data_presenca', competencia.data_fim);
+
+    if (delPresencasErr) throw delPresencasErr;
+
+    const { data: calculos, error: calcErr } = await supabase
+      .from('calculos')
+      .select('id')
+      .eq('competencia_id', competenciaId)
+      .eq('vinculo_internato_id', escala.vinculo_internato_id)
+      .eq('vinculo_adm_id', escala.vinculo_adm_id);
+
+    if (calcErr) throw calcErr;
+
+    const calculoIds = (calculos || []).map(c => c.id);
+    if (calculoIds.length > 0) {
+      await supabase.from('calculo_itens').delete().in('calculo_id', calculoIds);
+      await supabase.from('aprovacoes').delete().in('calculo_id', calculoIds);
+      await supabase.from('saldo_movimentos').delete().in('calculo_id', calculoIds);
+      await supabase.from('processo_calculos').delete().in('calculo_id', calculoIds);
+      await supabase.from('calculos').delete().in('id', calculoIds);
+    }
+
+    await supabase.from('audit_logs').insert({
+      tabela: 'escalas',
+      registro_id: escalaId,
+      operacao: 'DELETE',
+      dados_anteriores: escala,
+      dados_novos: null,
+      realizado_por: profileId,
+      ocorrido_em: now,
+      detalhes: { acao: 'excluir_escala_competencia', competencia_id: competenciaId, itens_removidos: itensNaCompetencia.length }
+    });
+
+    return { sucesso: true, itensRemovidos: itensNaCompetencia.length, escalaRemovida: (itensRestantes || []).length === 0 };
+  } catch (e) {
+    console.error('[excluirEscala]', e);
+    throw e;
+  }
+}
+
+export async function excluirAtuacao({
+  preceptorId,
+  competenciaId,
+  vinculoInternatoId = null,
+  vinculoAdmId = null,
+  profileId = null
+}) {
+  if (!preceptorId || !competenciaId || (!vinculoInternatoId && !vinculoAdmId)) {
+    throw new Error('Preceptor, competência e vínculo são obrigatórios.');
+  }
+
+  const now = new Date().toISOString();
+
+  try {
+    const { data: competencia, error: compErr } = await supabase
+      .from('competencias')
+      .select('*')
+      .eq('id', competenciaId)
+      .single();
+
+    if (compErr || !competencia) throw new Error('Competência não encontrada.');
+
+    const { data: calculos, error: calcErr } = await supabase
+      .from('calculos')
+      .select('id')
+      .eq('competencia_id', competenciaId)
+      .eq('preceptor_id', preceptorId)
+      .eq('vinculo_internato_id', vinculoInternatoId)
+      .eq('vinculo_adm_id', vinculoAdmId);
+
+    if (calcErr) throw calcErr;
+
+    const calculoIds = (calculos || []).map(c => c.id);
+
+    const { error: delPresencasErr } = await supabase
+      .from('presencas')
+      .delete()
+      .eq('preceptor_id', preceptorId)
+      .eq('vinculo_internato_id', vinculoInternatoId)
+      .eq('vinculo_adm_id', vinculoAdmId)
+      .gte('data_presenca', competencia.data_inicio)
+      .lte('data_presenca', competencia.data_fim);
+
+    if (delPresencasErr) throw delPresencasErr;
+
+    if (calculoIds.length > 0) {
+      await supabase.from('calculo_itens').delete().in('calculo_id', calculoIds);
+      await supabase.from('aprovacoes').delete().in('calculo_id', calculoIds);
+      await supabase.from('saldo_movimentos').delete().in('calculo_id', calculoIds);
+      await supabase.from('processo_calculos').delete().in('calculo_id', calculoIds);
+      await supabase.from('solicitacoes_nota_fiscal').delete().in('calculo_id', calculoIds);
+      await supabase.from('calculos').delete().in('id', calculoIds);
+    }
+
+    await supabase.from('audit_logs').insert({
+      tabela: 'calculos',
+      registro_id: calculoIds.join(','),
+      operacao: 'DELETE',
+      dados_anteriores: { calculo_ids: calculoIds, preceptor_id: preceptorId, competencia_id: competenciaId },
+      dados_novos: null,
+      realizado_por: profileId,
+      ocorrido_em: now,
+      detalhes: { acao: 'excluir_atuacao_competencia', vinculo_internato_id: vinculoInternatoId, vinculo_adm_id: vinculoAdmId }
+    });
+
+    return { sucesso: true, calculosRemovidos: calculoIds.length };
+  } catch (e) {
+    console.error('[excluirAtuacao]', e);
+    throw e;
+  }
+}
+
+
