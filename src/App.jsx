@@ -5,12 +5,13 @@ import{
   FileClock,FileSearch,Filter,History,
   Landmark,LockKeyhole,Menu,MoreHorizontal,Pencil,Plus,
   ReceiptText,Search,Settings,SlidersHorizontal,Stethoscope,
-  Trash2,UsersRound,WalletCards,X,
+  Trash2,UsersRound,Users,WalletCards,X,
   Shield,ShieldOff,Loader2,AlertCircle,LogIn,LogOut,
   UserRound,BriefcaseBusiness,MessageSquareText,
   Download,FileText,Printer,
   Info,MapPin,Calculator,RotateCw,BarChart3,Mail,FileSpreadsheet,Send,Paperclip,
-  Play,CheckCircle2,XCircle,AlertTriangle,DollarSign,CreditCard,Ban,CheckCircle,CheckCheck
+  Play,CheckCircle2,XCircle,AlertTriangle,DollarSign,CreditCard,Ban,CheckCircle,CheckCheck,
+  KeyRound,Copy
 } from "lucide-react";
 import {supabase} from "./supabase";
 import { jsPDF } from "jspdf";
@@ -38,8 +39,10 @@ import{
     inativarProfissao,inativarDisciplina,inativarLocal,inativarSetor,inativarRegistro,
     fetchVinculosLocaisParaEscalas,fetchVinculosParaEscalasPage,fetchEscalasPorVinculo,salvarEscala,inativarEscala,reativarEscala,
     fetchPresencas,fetchPreceptoresComEscalaNoDia,registrarPresencaCoordenador,corrigirPresencaAdministrativa,fetchPresencasConsolidadas,fetchFolhaPresenca,fetchCalendarioPresencas,fetchAjustes,fetchConfiguracoes,fetchAuditLogs,
-    fetchUsuarios,atualizarUsuario,criarUsuarioViaEdge,bloquearUsuario,inativarReativarUsuario,redefinirAcessoUsuario,redefinirAcessoViaEdge,deletarUsuarioViaEdge,marcarPrimeiroAcessoConcluido,atualizarDadosUsuario,enviarRecuperacaoSenha,
+    fetchUsuarios,atualizarUsuario,criarUsuarioViaEdge,bloquearUsuario,inativarReativarUsuario,redefinirAcessoUsuario,redefinirAcessoViaEdge,restaurarAcessoUsuarioViaEdge,deletarUsuarioViaEdge,marcarPrimeiroAcessoConcluido,atualizarDadosUsuario,enviarRecuperacaoSenha,
+    solicitarRecuperacaoAcesso,obterContatoRecuperacaoAcesso,salvarConfigResponsavelRecuperacao,listarConfigsResponsaveisRecuperacao,listarSolicitacoesRecuperacaoAcesso,
     fetchRegrasFinanceiras,salvarRegraFinanceira,inativarRegraFinanceira,reativarRegraFinanceira,checarConflitoRegraFinanceira,
+    previaExcluirRegraFinanceira,excluirRegraFinanceira,
     fetchPreceptoresPraticaParaRegras,fetchPreceptoresInternatoParaRegras,
     fetchInternatos,insertInternato,updateInternato,deleteInternato,inativarInternato,checkInternatoDependencies,
     fetchDisciplinasByInternato,setInternatoDisciplinas,fetchCursos,
@@ -60,6 +63,7 @@ import{
     iniciarPagamento,concluirPagamento,cancelarPagamento,buscarPagamentoPorSolicitacao,
     previaPagamentoLote,executarPagamentoLote,
     montarMapaSaldosVinculos,resumoSaldoVinculos,chaveVinculoLinha,passaFiltroSaldo,itensCabecalhoSaldo,percentualSaldoTexto,larguraBarraSaldo,montarRankingSaldoVinculos,valoresSaldoExport,
+    montarDadosBancariosEmail,
     statusBadge,fmtData,fmtTimestamp,turnoLabel,diaLabel,fmtCompetencia
   } from "./services/queries";
 
@@ -85,6 +89,12 @@ const SALDO_VAZIO={
   esgotado:"Nenhum preceptor com saldo esgotado para os filtros selecionados.",
   nao_informado:"Nenhum preceptor sem saldo informado para os filtros selecionados."
 };
+
+// Modalidades que exibem Agência e Conta no formulário do vínculo (opcionais).
+function ehModalidadeBancaria(nome){
+  const n=String(nome||"").toLowerCase().trim();
+  return n.includes("nfs")||n.includes("rpa");
+}
 
 
 
@@ -144,7 +154,7 @@ function parseBRLDecimal(v) {
 
 const NAV_BASE=[
   ["Operação",[["escalas","Escalas",CalendarDays],["registrar-presencas","Registrar Presenças",CalendarCheck],["presencas","Presenças",CalendarCheck]]],
-  ["Financeiro",[["controle-financeiro","Controle financeiro",WalletCards],["dashboard","Dashboard",BarChart3]]],
+  ["Financeiro",[["controle-financeiro","Controle financeiro",WalletCards],["acompanhamento-financeiro","Acompanhamento financeiro",FileSearch],["dashboard","Dashboard",BarChart3]]],
   ["Cadastros",[["preceptores-internato","Preceptores do Internato",Stethoscope],["cadastros-auxiliares","Cadastros auxiliares",ClipboardCheck],["regras","Regras financeiras",SlidersHorizontal]]],
   ["Governança",[["auditoria","Auditoria",History],["configuracoes","Configurações",Settings]]]
 ];
@@ -181,6 +191,7 @@ const PAGE_META={
   saldos:{title:"Saldos autorizados",desc:"Autorizações, reservas, consumo, estornos e disponibilidade.",btn:"Novo saldo",cols:["Favorecido","CH","Autorizado","Consumido","Disponível","Situação"]},
   processos:{title:"Processos e movimentos",desc:"CHs, processos, movimentos, deferimentos e andamento.",btn:"Novo processo",cols:["Processo/CH","Favorecido","Competência","Movimento","Valor","Situação"]},
   pagamentos:{title:"Pagamentos",desc:"Solicitação de nota fiscal, demonstrativos e acompanhamento do pagamento.",btn:null,cols:[]},
+  "acompanhamento-financeiro":{title:"Acompanhamento financeiro",desc:"Consulta detalhada da situação financeira, dos saldos e dos vínculos dos preceptores.",btn:null,cols:[]},
   dashboard:{title:"Dashboard",desc:"Indicadores, filtros e relatórios consolidados do Internato.",btn:null,cols:[]},
   auditoria:{title:"Auditoria",desc:"Histórico de alterações, aprovações e operações críticas.",btn:null,cols:["Data e hora","Usuário","Ação","Registro","Detalhe","Origem"]},
   configuracoes:{title:"Configurações",desc:"Perfis, permissões, semestres, feriados e parâmetros gerais.",btn:"Nova configuração",cols:["Configuração","Categoria","Valor atual","Última alteração","Responsável","Situação"]},
@@ -197,6 +208,16 @@ function LoginScreen({onLogin}){
   const[showSenha,setShowSenha]=useState(false);
   const[erro,setErro]=useState("");
   const[carregando,setCarregando]=useState(false);
+
+  // Modal Esqueci minha senha (fluxo de recuperação administrativa)
+  const[modalRecuperar,setModalRecuperar]=useState(false);
+  const[recupEmail,setRecupEmail]=useState("");
+  const[recupErro,setRecupErro]=useState("");
+  const[recupCarregando,setRecupCarregando]=useState(false);
+  const[recupEnviado,setRecupEnviado]=useState(false);
+  const[recupResponsavel,setRecupResponsavel]=useState(null);
+  const[recupCopiadoIdx,setRecupCopiadoIdx]=useState(null);
+
   const handle=async(e)=>{
     e.preventDefault();
     setErro("");setCarregando(true);
@@ -213,6 +234,55 @@ function LoginScreen({onLogin}){
     onLogin(data.session);
     setCarregando(false);
   };
+
+  const handleSolicitarRecuperacao=async(e)=>{
+    e.preventDefault();
+    setRecupErro("");
+    const norm=recupEmail.trim().toLowerCase();
+    if(!norm){setRecupErro("Informe seu e-mail.");return;}
+    setRecupCarregando(true);
+    try{
+      const res=await solicitarRecuperacaoAcesso(norm);
+      if(!res?.sucesso){
+        setRecupErro(res?.mensagem||"Não foi possível registrar a solicitação.");
+        setRecupCarregando(false);
+        return;
+      }
+      const lista=(Array.isArray(res.contatos)&&res.contatos.length>0)
+        ?res.contatos
+        :(res.responsavel_email?[{nome:res.responsavel_nome,email:res.responsavel_email}]:[]);
+      setRecupResponsavel({
+        configurado:res.responsavel_configurado,
+        nome:res.responsavel_nome,
+        email:res.responsavel_email,
+        contatos:lista
+      });
+      setRecupEnviado(true);
+    }catch(err){
+      setRecupErro(err?.message||"Falha ao registrar a solicitação.");
+    }finally{
+      setRecupCarregando(false);
+    }
+  };
+
+  const handleCopiarEmail=async(emailTexto,idx)=>{
+    if(!emailTexto)return;
+    try{
+      await navigator.clipboard.writeText(emailTexto);
+      setRecupCopiadoIdx(idx);
+      setTimeout(()=>setRecupCopiadoIdx(null),2500);
+    }catch{}
+  };
+
+  const fecharModalRecuperar=()=>{
+    setModalRecuperar(false);
+    setRecupEnviado(false);
+    setRecupErro("");
+    setRecupEmail("");
+    setRecupResponsavel(null);
+    setRecupCopiadoIdx(null);
+  };
+
   return <div className="login-screen">
     <div className="login-card">
       <Logo variant="completa"/>
@@ -224,7 +294,79 @@ function LoginScreen({onLogin}){
         {erro&&<div className="login-erro"><AlertCircle size={14}/> {erro}</div>}
         <button className="btn" type="submit" disabled={carregando}>{carregando?<Loader2 size={16} className="spin"/>:<><LogIn size={16}/></>} Entrar</button>
       </form>
-      <a href="/recuperar-senha" className="auth-forgot-link">Esqueci minha senha?</a>
+      <button
+        type="button"
+        className="auth-forgot-link"
+        style={{background:"none",border:"none",cursor:"pointer",display:"inline-block",marginTop:12}}
+        onClick={()=>{setRecupEmail(email);setModalRecuperar(true);}}
+      >
+        Esqueci minha senha?
+      </button>
+
+      {modalRecuperar&&<div className="system-dialog-overlay" onMouseDown={e=>{if(e.target===e.currentTarget&&!recupCarregando)fecharModalRecuperar()}}>
+        <section className="system-dialog" role="dialog" aria-modal="true" style={{maxWidth:440,margin:"auto"}}>
+          <header>
+            <div className="system-dialog-icon"><KeyRound size={20}/></div>
+            <div>
+              <small>GESTÃO DE PRECEPTORIA</small>
+              <h3>Esqueci minha senha</h3>
+            </div>
+            <button onClick={fecharModalRecuperar} disabled={recupCarregando} aria-label="Fechar"><X size={18}/></button>
+          </header>
+          <div className="system-dialog-body" style={{padding:20}}>
+            {!recupEnviado?(
+              <form onSubmit={handleSolicitarRecuperacao} id="form-recup-acesso-login">
+                <p style={{fontSize:13,color:"var(--text-muted)",marginBottom:16}}>Informe o e-mail cadastrado na sua conta de Administrador ou Coordenador.</p>
+                <label style={{display:"block",marginBottom:12}}>
+                  <b style={{display:"block",fontSize:13,marginBottom:4}}>E-mail</b>
+                  <input type="email" value={recupEmail} onChange={e=>setRecupEmail(e.target.value)} placeholder="seu@email.com" required autoFocus style={{width:"100%",padding:"9px 12px",borderRadius:8,border:"1px solid var(--border)"}}/>
+                </label>
+                {recupErro&&<div className="login-erro" style={{marginBottom:12}}><AlertCircle size={14}/> {recupErro}</div>}
+              </form>
+            ):(
+              <div>
+                <div style={{display:"flex",alignItems:"center",gap:8,color:"#16a34a",marginBottom:12,fontWeight:700,fontSize:15}}>
+                  <CheckCircle size={20}/> Solicitação de recuperação registrada
+                </div>
+                {recupResponsavel?.contatos?.length>0?(
+                  <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:16}}>
+                    <p style={{fontSize:13,color:"var(--navy-800)",fontWeight:600,margin:0}}>
+                      {recupResponsavel.contatos.length>1
+                        ?"Para recuperar o acesso, entre em contato com um dos responsáveis abaixo:"
+                        :"Para recuperar o acesso, entre em contato com o responsável:"}
+                    </p>
+                    {recupResponsavel.contatos.map((c,idx)=>(
+                      <div key={idx} style={{padding:12,background:"#f8fafc",borderRadius:8,border:"1px solid var(--border)"}}>
+                        <div style={{fontSize:13,marginBottom:3}}><span style={{color:"var(--text-muted)"}}>Responsável:</span> <strong>{c.nome}</strong></div>
+                        <div style={{fontSize:13,marginBottom:8}}><span style={{color:"var(--text-muted)"}}>E-mail:</span> <strong>{c.email}</strong></div>
+                        <button type="button" className="btn secondary" onClick={()=>handleCopiarEmail(c.email,idx)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:6,minHeight:34,fontSize:12}}>
+                          {recupCopiadoIdx===idx?<Check size={14} style={{color:"#16a34a"}}/>:<Copy size={14}/>} {recupCopiadoIdx===idx?"E-mail copiado!":"Copiar e-mail"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ):(
+                  <p style={{fontSize:13,color:"var(--text-muted)",marginBottom:16,lineHeight:1.5}}>
+                    Solicitação registrada. O contato responsável pela recuperação de acesso ainda não foi configurado. Entre em contato com a Administração do sistema.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+          <footer style={{display:"flex",gap:8,justifyContent:"flex-end",padding:"12px 20px",borderTop:"1px solid var(--border)"}}>
+            {!recupEnviado?(
+              <>
+                <button type="button" className="btn secondary" onClick={fecharModalRecuperar} disabled={recupCarregando}>Cancelar</button>
+                <button type="submit" form="form-recup-acesso-login" className="btn" disabled={recupCarregando}>
+                  {recupCarregando?<><Loader2 size={16} className="spin"/> Enviando...</>:"Enviar"}
+                </button>
+              </>
+            ):(
+              <button type="button" className="btn" onClick={fecharModalRecuperar} style={{minWidth:90}}>Fechar</button>
+            )}
+          </footer>
+        </section>
+      </div>}
     </div>
   </div>;
 }
@@ -1319,6 +1461,8 @@ function VinculoForm({preceptor, vinculo, onClose, onSaved, page}){
         vinculo_modalidade_pagamento_id:vinculo.modalidade_pagamento_id||"",
         vinculo_cnpj:vinculo.cnpj||"",
         vinculo_razao_social:vinculo.razao_social||"",
+        vinculo_agencia:vinculo.agencia||"",
+        vinculo_conta:vinculo.conta||"",
         _coordenadores:(vinculo.coordenadores||[]).filter(c=>c.status==="ativo").map(c=>c.profile_id),
         valor_inicial:vinculo.valor_inicial!=null?vinculo.valor_inicial:"",
         regra_financeira_id:"",
@@ -1338,6 +1482,8 @@ function VinculoForm({preceptor, vinculo, onClose, onSaved, page}){
       vinculo_modalidade_pagamento_id:"",
       vinculo_cnpj:"",
       vinculo_razao_social:"",
+      vinculo_agencia:"",
+      vinculo_conta:"",
       _coordenadores:[],
       valor_inicial:"",
       regra_financeira_id:"",
@@ -1405,6 +1551,7 @@ function VinculoForm({preceptor, vinculo, onClose, onSaved, page}){
 
   const selectedModalidade=(formOpts.modalidades||[]).find(m=>m.id===formData.vinculo_modalidade_pagamento_id);
   const isNFS=selectedModalidade?.nome?.toLowerCase().includes("nfs");
+  const mostraDadosBancarios=ehModalidadeBancaria(selectedModalidade?.nome);
   const regraSelecionadaId=formData.regra_financeira_id||"";
   const regraSelecionada=(formOpts.regrasFinanceiras||[]).find(r=>r.id===regraSelecionadaId)||null;
   const regraAnteriorId=formData._regraAnteriorId||"";
@@ -1457,6 +1604,8 @@ function VinculoForm({preceptor, vinculo, onClose, onSaved, page}){
         modalidade_pagamento_id:v("vinculo_modalidade_pagamento_id")||null,
         cnpj:isNFS?formData.vinculo_cnpj||null:null,
         razao_social:isNFS?v("vinculo_razao_social")||null:null,
+        agencia:formData.vinculo_agencia||null,
+        conta:formData.vinculo_conta||null,
         valor_inicial:formData.valor_inicial!=null&&formData.valor_inicial!==""?formData.valor_inicial:null,
         status:formData.status||"ativo"
       };
@@ -1556,6 +1705,12 @@ function VinculoForm({preceptor, vinculo, onClose, onSaved, page}){
       }} placeholder="00.000.000/0000-00"/></label>
       <label><b>Razão social</b><input value={v("vinculo_razao_social")||""} onChange={e=>set("vinculo_razao_social",e.target.value||null)} placeholder="Razão social da empresa"/></label>
     </>}
+    {mostraDadosBancarios&&<>
+      <label><b>Agência</b><input value={v("vinculo_agencia")} onChange={e=>set("vinculo_agencia",e.target.value)}/>
+        <small style={{display:"block",marginTop:3,color:"var(--text-muted,#64748b)",fontSize:12}}>Preenchimento opcional</small></label>
+      <label><b>Conta</b><input value={v("vinculo_conta")} onChange={e=>set("vinculo_conta",e.target.value)}/>
+        <small style={{display:"block",marginTop:3,color:"var(--text-muted,#64748b)",fontSize:12}}>Preenchimento opcional</small></label>
+    </>}
 
     <div style={{gridColumn:"1/-1",marginTop:8}}>
       <CoordenadoresSelect
@@ -1631,6 +1786,8 @@ function Form({page,close,save,formData,setFormData,formOptions,optionsLoading,o
   const isNFS=selectedModalidade?.nome?.toLowerCase().includes("nfs");
   const selectedModalidadeVinculo=(opts.modalidades||[]).find(m=>m.id===formData.vinculo_modalidade_pagamento_id);
   const isNFSVinculo=selectedModalidadeVinculo?.nome?.toLowerCase().includes("nfs");
+  const mostraDadosBancariosVinculo=ehModalidadeBancaria(selectedModalidadeVinculo?.nome);
+  const mostraDadosBancariosPreceptor=ehModalidadeBancaria(selectedModalidade?.nome);
   const setores=(opts.setores||[]);
 
   const camposFaltantesForm=(()=>{
@@ -1773,6 +1930,12 @@ function Form({page,close,save,formData,setFormData,formOptions,optionsLoading,o
             }} placeholder="00.000.000/0000-00"/></label>
             <label><b>Razão social</b><input value={v("vinculo_razao_social")||""} onChange={e=>set("vinculo_razao_social",e.target.value||null)} placeholder="Razão social da empresa"/></label>
            </>}
+          {(isInternato?mostraDadosBancariosVinculo:mostraDadosBancariosPreceptor)&&<>
+            <label><b>Agência</b><input value={v("vinculo_agencia")} onChange={e=>set("vinculo_agencia",e.target.value)}/>
+              <small style={{display:"block",marginTop:3,color:"var(--text-muted,#64748b)",fontSize:12}}>Preenchimento opcional</small></label>
+            <label><b>Conta</b><input value={v("vinculo_conta")} onChange={e=>set("vinculo_conta",e.target.value)}/>
+              <small style={{display:"block",marginTop:3,color:"var(--text-muted,#64748b)",fontSize:12}}>Preenchimento opcional</small></label>
+           </>}
           {isInternato&&<>
             <CoordenadoresSelect
               value={v("_coordenadores")||[]}
@@ -1828,6 +1991,8 @@ function Form({page,close,save,formData,setFormData,formOptions,optionsLoading,o
                     {vinc.setor?.nome&&<div><small>Setor</small><b>{vinc.setor.nome}</b></div>}
                     {vinc.semestre?.codigo&&<div><small>Semestre</small><b>{vinc.semestre.codigo}</b></div>}
                     {vinc.data_inicio&&<div><small>Vigência</small><b>{fmtData(vinc.data_inicio)}{vinc.data_fim?` a ${fmtData(vinc.data_fim)}`:""}</b></div>}
+                    {vinc.agencia&&<div><small>Agência</small><b>{vinc.agencia}</b></div>}
+                    {vinc.conta&&<div><small>Conta</small><b>{vinc.conta}</b></div>}
                     {isInternato&&vinc.coordenadores&&vinc.coordenadores.length>0&&<div className="wide"><small>Coordenadores</small><b>{vinc.coordenadores.map(c=>c.nome_completo).join(", ")}</b></div>}
                     {isInternato&&vinc.regraAtiva&&<div className="wide"><small>Regra financeira</small><b>{vinc.regraAtiva.regra?.nome||"-"}</b></div>}
                     {isInternato&&<div><small>Saldo semestral</small><b>{vinc.valor_inicial!=null?formatCurrencyBRL(vinc.valor_inicial):"-"}</b></div>}
@@ -2659,6 +2824,18 @@ async function handlePrepararEmailOutlook(preceptorId, competenciaId, contexto =
       corpo += `=========================================\n\n`;
     }
 
+    // Dados bancários (Agência/Conta) por vínculo: só aparecem quando preenchidos.
+    // Modo "unico" = todos os vínculos com os mesmos dados → bloco único após a
+    // identificação. Modo "por_vinculo" = dados diferentes/parciais → linhas
+    // dentro do bloco de cada atuação (após Local/Setor).
+    const dadosBancarios = montarDadosBancariosEmail(atuacoes);
+    if (dadosBancarios.modo === 'unico') {
+      corpo += `=========================================\n`;
+      corpo += `DADOS BANCÁRIOS\n`;
+      corpo += dadosBancarios.linhasUnico.join('\n') + '\n';
+      corpo += `=========================================\n\n`;
+    }
+
     atuacoes.forEach((at, idx) => {
       corpo += `--- ATUAÇÃO ${idx + 1}: ${at.internato_ou_disciplina}${at.periodo_academico ? ' (' + at.periodo_academico + ')' : ''} ---\n`;
       if (!identUnica) {
@@ -2668,6 +2845,10 @@ async function handlePrepararEmailOutlook(preceptorId, competenciaId, contexto =
       }
       if (at.unidade_nome) corpo += `Unidade: ${at.unidade_nome}\n`;
       if (at.local_nome || at.setor_nome) corpo += `Local: ${at.local_nome}${at.setor_nome ? (at.local_nome ? ' | ' : '') + 'Setor: ' + at.setor_nome : ''}\n`;
+      if (dadosBancarios.modo === 'por_vinculo') {
+        const linhasBanco = dadosBancarios.linhasPorCalculo[at.calculo_id] || [];
+        if (linhasBanco.length > 0) corpo += linhasBanco.join('\n') + '\n';
+      }
       if (at.regra_financeira) corpo += `Regra aplicada: ${at.regra_financeira}\n`;
 
       if (at.presencas && at.presencas.length > 0) {
@@ -2733,8 +2914,592 @@ async function handlePrepararEmailOutlook(preceptorId, competenciaId, contexto =
 }
 
 
+// Filtros rápidos de situação da lista do Acompanhamento financeiro.
+// Sem "Pendentes": redundante com "Não pagos"/"Com pendência" (etapa CRIAR-ACOMPANHAMENTO-FINANCEIRO).
+const ACOMP_RAPIDAS=[
+  {k:"todos",rot:"Todos"},
+  {k:"conferencia",rot:"Aguardando conferência"},
+  {k:"email",rot:"E-mail não enviado"},
+  {k:"naopag",rot:"Não pagos"},
+  {k:"pagos",rot:"Pagos"},
+  {k:"pendencia",rot:"Com pendência"}
+];
+
+// Página FINANCEIRO → Acompanhamento financeiro: consulta detalhada da situação,
+// dos saldos e dos vínculos. Blocos transferidos do Dashboard (etapa CRIAR-ACOMPANHAMENTO-FINANCEIRO):
+// utilização do saldo semestral, lista de acompanhamento, expansão de vínculos,
+// filtros de situação/saldo, busca, paginação e ação "Abrir no Controle financeiro".
+function AcompanhamentoFinanceiroPage({onAbrirControle}){
+  const now=new Date(),[rows,setRows]=useState([]),[solsMap,setSolsMap]=useState({}),[pagDatas,setPagDatas]=useState({}),[revisoes,setRevisoes]=useState({}),[loading,setLoading]=useState(true),[error,setError]=useState(''),[abertos,setAbertos]=useState({}),[rapida,setRapida]=useState('todos'),[pagLista,setPagLista]=useState(1),[porPagina,setPorPagina]=useState(20),[f,setF]=useState({competencia:`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`,mes:'',ano:'',busca:'',unidade:'',internato:'',local:'',status:''});
+  const[filtrosAbertos,setFiltrosAbertos]=useState(false);
+  const[exportAberto,setExportAberto]=useState(false);
+  const[exportFormato,setExportFormato]=useState('excel');
+  const[exportConteudo,setExportConteudo]=useState({resumo:true,lista:true,composicao:true});
+  const[exportGerando,setExportGerando]=useState(false);
+  const[exportErro,setExportErro]=useState('');
+  const[saldoFiltro,setSaldoFiltro]=useState('');
+  const[abrirPreceptor,setAbrirPreceptor]=useState(null);
+  useEffect(()=>{
+    let vivo=true;
+    setLoading(true);setError('');
+    Promise.all([
+      fetchPainelPagamentos({incluirTodos:true}),
+      fetchSolicitacoesNotaFiscal().catch(e=>{console.warn('[acompanhamento] Falha ao carregar situação fiscal:',e);return[];}),
+      fetchDatasPagamentos().catch(e=>{console.warn('[acompanhamento] Falha ao carregar datas de pagamento:',e);return{};})
+    ]).then(([painel,sols,datas])=>{
+      if(!vivo)return;
+      const mapa={};
+      (sols||[]).forEach(s=>{mapa[`${s.preceptor_id}|${s.competencia}`]=s;});
+      const enriquecido=(painel||[]).map(r=>({...r,competencia:`${r.ano}-${String(r.mes).padStart(2,'0')}`,situacao_nota:mapa[`${r.preceptor_id}|${r.ano}-${String(r.mes).padStart(2,'0')}`]?.situacao||r.situacao_nota||'nao_solicitada'}));
+      setRows(enriquecido);setSolsMap(mapa);setPagDatas(datas||{});
+      const ids=[...new Set(enriquecido.map(r=>r.id).filter(Boolean))];
+      return fetchRevisoesCompetencia(ids).then(rev=>{if(vivo)setRevisoes(rev||{});});
+    }).catch(e=>{if(vivo){console.warn('[acompanhamento]',e);setError(e.message||'Erro ao carregar dados do acompanhamento.');}})
+      .finally(()=>{if(vivo)setLoading(false);});
+    return()=>{vivo=false;};
+  },[]);
+  useEffect(()=>{setPagLista(1);},[f,rapida,porPagina,saldoFiltro]);
+  const data=useMemo(()=>filtrarFinanceiro(rows,f),[rows,f]);
+  // Saldo semestral por vínculo (fonte: fila financeira inteira — semestre do vínculo).
+  const mapaSaldos=useMemo(()=>montarMapaSaldosVinculos(rows),[rows]);
+  // Ranking "Utilização do saldo semestral" — mesmos dados, busca e filtros da página.
+  const rankingSaldo=useMemo(()=>montarRankingSaldoVinculos(data,mapaSaldos,10),[data,mapaSaldos]);
+  const ehRevisada=(r)=>{
+    if(!r||!r.id)return false;
+    const rev=revisoes[r.id];
+    if(!rev||rev.status!=='aprovado')return false;
+    if(r.calculado_em&&rev.decidido_em&&new Date(rev.decidido_em)<new Date(r.calculado_em))return false;
+    return true;
+  };
+  const bucketDoGrupo=(g)=>{
+    const st=g.sol?.situacao||g.situacao||'nao_solicitada';
+    if(st==='pago')return'pago';
+    if(st==='nota_recebida'||st==='em_pagamento'||st==='cancelado')return'nota_recebida';
+    if(st==='solicitada')return'aguardando_nf';
+    if(st==='preparada')return'aguardando_envio';
+    return g.atuacoes.length>0&&g.atuacoes.every(ehRevisada)?'aguardando_envio':'aguardando_revisao';
+  };
+  const rotuloSituacao=(st)=>({nao_solicitada:'E-mail não enviado',preparada:'E-mail preparado',solicitada:'Não pago',nota_recebida:'Não pago',em_pagamento:'Não pago',pago:'Pago',cancelado:'Cancelado',email_nao_enviado:'E-mail não enviado',nao_pago:'Não pago'}[st]||'E-mail não enviado');
+  const dataPagamentoGrupo=(g)=>{if(!g||!g.sol||!g.sol.id)return null;const v=pagDatas[g.sol.id];if(!v)return null;const d=new Date(v);return isNaN(d.getTime())?null:v;};
+  const fmtMovimento=(v)=>{if(!v)return null;const s=String(v);if(/^\d{4}-\d{2}-\d{2}$/.test(s)){const[y,m,d]=s.split('-');return`${d}/${m}/${y}`;}const dt=new Date(s);if(isNaN(dt.getTime()))return null;const p=n=>String(n).padStart(2,'0');return`${p(dt.getDate())}/${p(dt.getMonth()+1)}/${dt.getFullYear()} ${p(dt.getHours())}:${p(dt.getMinutes())}`;};
+  const ultimaMovimentacao=(g)=>{
+    if(bucketDoGrupo(g)==='pago'){const v=dataPagamentoGrupo(g);const t=v?fmtMovimento(v):null;return t||'Data de pagamento não registrada';}
+    const s=g.sol;
+    const candidatos=[s&&s.enviado_em,s&&s.updated_at,s&&s.created_at].filter(Boolean);
+    for(const c of candidatos){const t=fmtMovimento(c);if(t)return t;}
+    return'Sem movimentação';
+  };
+  const grupos=useMemo(()=>{
+    const m={};
+    data.forEach(r=>{
+      const k=`${r.preceptor_id||r.preceptor_nome}|${r.ano}-${String(r.mes).padStart(2,'0')}`;
+      if(!m[k])m[k]={chave:k,preceptor_id:r.preceptor_id,nome:r.preceptor_nome||'Preceptor',mes:r.mes,ano:r.ano,competencia:`${r.ano}-${String(r.mes).padStart(2,'0')}`,atuacoes:[],turnos:0,valor:0,situacao:r.situacao_nota||'nao_solicitada',sol:solsMap[k]};
+      const g=m[k];
+      g.atuacoes.push(r);
+      g.turnos+=Number(r.quantidade_presencas||0);
+      g.valor+=Number(r.total_bruto||0);
+    });
+    return Object.values(m).map(g=>{
+      g.chaves=[...new Set(g.atuacoes.map(chaveVinculoLinha).filter(Boolean))];
+      g.saldo=resumoSaldoVinculos(g.chaves,mapaSaldos);
+      return g;
+    }).sort((a,b)=>(a.nome||'').localeCompare(b.nome||''));
+  },[data,solsMap,mapaSaldos]);
+  // Pendências reais do fluxo financeiro (uma entrada por preceptor + competência).
+  const pendenciasMap=useMemo(()=>{
+    const mapa=new Map();
+    const marcar=(chave,motivo)=>{if(!mapa.has(chave))mapa.set(chave,[]);const lista=mapa.get(chave);if(!lista.includes(motivo))lista.push(motivo);};
+    grupos.forEach(g=>{
+      if(bucketDoGrupo(g)==='pago')return;
+      g.atuacoes.forEach(r=>{
+        if(!r.regra_nome||r.regra_nome==='Regra financeira pendente')marcar(g.chave,'Regra financeira pendente');
+        else if(r.observacoes&&r.observacoes!=='Calculado')marcar(g.chave,'Cálculo desatualizado');
+        if(!ehRevisada(r))marcar(g.chave,'Atuação não revisada');
+      });
+      const sol=g.sol;
+      if(bucketDoGrupo(g)==='aguardando_envio'&&sol&&sol.situacao==='preparada'&&!sol.identificacao_fiscal)marcar(g.chave,'Identificação fiscal ausente (bloqueia a emissão)');
+      if(!sol&&g.situacao&&g.situacao!=='nao_solicitada')marcar(g.chave,'Falha no processo: registro fiscal inconsistente');
+    });
+    return mapa;
+  },[grupos,revisoes]);
+  const gruposPendencia=useMemo(()=>new Set(pendenciasMap.keys()),[pendenciasMap]);
+  const registros=useMemo(()=>{
+    let base;
+    if(rapida==='todos')base=grupos;
+    else if(rapida==='conferencia')base=grupos.filter(g=>bucketDoGrupo(g)==='aguardando_revisao');
+    else if(rapida==='email')base=grupos.filter(g=>{const b=bucketDoGrupo(g);return b==='aguardando_revisao'||b==='aguardando_envio';});
+    else if(rapida==='naopag')base=grupos.filter(g=>{const b=bucketDoGrupo(g);return b==='aguardando_nf'||b==='nota_recebida';});
+    else if(rapida==='pagos')base=grupos.filter(g=>bucketDoGrupo(g)==='pago');
+    else if(rapida==='pendencia')base=grupos.filter(g=>gruposPendencia.has(g.chave));
+    else base=grupos;
+    if(!saldoFiltro)return base;
+    return base.filter(g=>passaFiltroSaldo(g.saldo,saldoFiltro));
+  },[grupos,rapida,gruposPendencia,saldoFiltro]);
+  // Clique na barra do ranking: expande o registro do preceptor assim que a lista o contém.
+  useEffect(()=>{
+    if(!abrirPreceptor)return;
+    const alvo=abrirPreceptor;
+    const chaves=registros.filter(g=>(alvo.id!=null&&g.preceptor_id===alvo.id)||g.nome===alvo.nome).map(g=>g.chave);
+    if(chaves.length)setAbertos(p=>{const n={...p};chaves.forEach(k=>{n[k]=true});return n;});
+    setAbrirPreceptor(null);
+  },[abrirPreceptor,registros]);
+  // Totais de saldo exibidos no card (mesma fonte/fórmula do Dashboard).
+  const resumoSaldo=useMemo(()=>{
+    const saldos={};
+    data.forEach(r=>{const k=r.vinculo_internato_id||r.vinculo_adm_id;if(k&&!saldos[k])saldos[k]=Number(r.saldo_semestral||0)});
+    const saldo=Object.values(saldos).reduce((a,v)=>a+v,0);
+    const pago=data.filter(r=>r.situacao_nota==='pago').reduce((a,r)=>a+Number(r.total_bruto||0),0);
+    return{saldo,pago,disponivel:saldo-pago};
+  },[data]);
+  const NOMES_MES_ACOMP=["","Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+  const FILTROS_ACOMP=['competencia','mes','ano','unidade','internato','local','status'];
+  const filtrosDash=useMemo(()=>{
+    const comps=new Map(),anos=new Set();
+    rows.forEach(r=>{const k=`${r.ano}-${String(r.mes).padStart(2,'0')}`;if(!comps.has(k))comps.set(k,apuracaoMesLabel(r.mes,r.ano));anos.add(String(r.ano));});
+    return[
+      {key:'competencia',label:'Competência',options:[...comps.entries()].sort((a,b)=>b[0].localeCompare(a[0])).map(([value,label])=>({value,label}))},
+      {key:'unidade',label:'Unidade'},
+      {key:'internato',label:'Internato'},
+      {key:'local',label:'Local'},
+      {key:'status',label:'Situação',options:[{value:'email_nao_enviado',label:'E-mail não enviado'},{value:'preparada',label:'E-mail preparado'},{value:'nao_pago',label:'Não pago'},{value:'pago',label:'Pago'}]},
+      {key:'mes',label:'Mês',options:NOMES_MES_ACOMP.slice(1).map((m,i)=>({value:String(i+1).padStart(2,'0'),label:m}))},
+      {key:'ano',label:'Ano',options:[...anos].sort().map(a=>({value:a,label:a}))}
+    ];
+  },[rows]);
+  const filtrosPainel=useMemo(()=>{const o={};FILTROS_ACOMP.forEach(k=>{o[k]=f[k]||''});return o;},[f]);
+  const aplicarPainel=(next)=>{
+    setF(prev=>{
+      const out={...prev};
+      FILTROS_ACOMP.forEach(k=>{out[k]=(next&&next[k])||''});
+      if(out.mes!==prev.mes||out.ano!==prev.ano)out.competencia='';
+      else if(out.competencia!==prev.competencia){out.mes='';out.ano='';}
+      return out;
+    });
+    setFiltrosAbertos(false);
+  };
+  const limparTodosFiltros=()=>setF({competencia:'',mes:'',ano:'',busca:'',unidade:'',internato:'',local:'',status:''});
+  const chipsBusca=f.busca?[{key:'busca',label:`Busca: "${f.busca}"`,clear:()=>setF(prev=>({...prev,busca:''}))}]:[];
+  const rotuloCompetencia=f.competencia?new Date(`${f.competencia}-02T12:00:00`).toLocaleDateString('pt-BR',{month:'long',year:'numeric'}):(f.mes&&f.ano?`${NOMES_MES_ACOMP[Number(f.mes)]||f.mes} de ${f.ano}`:'Todas as competências');
+  const filtrosAplicados=useMemo(()=>{
+    const out=[];
+    if(f.competencia)out.push(['Competência',rotuloCompetencia]);
+    if(f.mes)out.push(['Mês',NOMES_MES_ACOMP[Number(f.mes)]||f.mes]);
+    if(f.ano)out.push(['Ano',String(f.ano)]);
+    if(f.unidade)out.push(['Unidade',f.unidade]);
+    if(f.internato)out.push(['Internato',f.internato]);
+    if(f.local)out.push(['Local',f.local]);
+    if(f.status)out.push(['Situação',rotuloSituacao(f.status)]);
+    if(f.busca)out.push(['Busca',f.busca]);
+    if(!out.length)out.push(['Filtros','Nenhum filtro aplicado']);
+    return out;
+  },[f]);
+  const round2=(v)=>Math.round((Number(v)||0)*100)/100;
+  function montarDadosExportacao(){
+    const lista=registros;
+    const atuacoes=[];
+    lista.forEach(g=>g.atuacoes.forEach(r=>atuacoes.push({grupo:g,r})));
+    const turnos=lista.reduce((a,g)=>a+g.turnos,0);
+    const calculado=lista.reduce((a,g)=>a+g.valor,0);
+    const pago=lista.filter(g=>bucketDoGrupo(g)==='pago').reduce((a,g)=>a+g.valor,0);
+    return{lista,atuacoes,turnos,calculado,pago};
+  }
+  function gerarExcel(){
+    const{lista,atuacoes,turnos,calculado,pago}=montarDadosExportacao();
+    const gerado=new Date();
+    const planilhaResumo=[];
+    const secao=(t)=>planilhaResumo.push([{v:t,s:S_BOLD}]);
+    const celSaldoExcel=(v)=>typeof v==='number'?{v:round2(v),s:S_MONEY}:v;
+    const celSaldoLinha=(resumoVinculo)=>{
+      const sv=valoresSaldoExport(resumoVinculo);
+      return[celSaldoExcel(sv.saldoInicial),{v:round2(sv.utilizado),s:S_MONEY},{v:round2(sv.pago),s:S_MONEY},celSaldoExcel(sv.disponivel),sv.percentual==null?'—':{v:round2(sv.percentual),s:S_MONEY}];
+    };
+    planilhaResumo.push([{v:'Acompanhamento financeiro — Preceptoria',s:S_BOLD}]);
+    planilhaResumo.push(['Competência',rotuloCompetencia]);
+    planilhaResumo.push(['Gerado em',gerado.toLocaleString('pt-BR')]);
+    planilhaResumo.push([]);
+    secao('Filtros aplicados');
+    filtrosAplicados.forEach(([k,v])=>planilhaResumo.push([k,v]));
+    if(exportConteudo.resumo){
+      planilhaResumo.push([]);
+      secao('Totais da seleção');
+      planilhaResumo.push([{v:'Indicador',s:S_BOLD},{v:'Valor',s:S_BOLD}]);
+      planilhaResumo.push(['Preceptores',lista.length]);
+      planilhaResumo.push(['Atuações',atuacoes.length]);
+      planilhaResumo.push(['Turnos confirmados',turnos]);
+      planilhaResumo.push(['Valor calculado',{v:round2(calculado),s:S_MONEY}]);
+      planilhaResumo.push(['Valor pago',{v:round2(pago),s:S_MONEY}]);
+      planilhaResumo.push(['Saldo autorizado',{v:round2(resumoSaldo.saldo),s:S_MONEY}]);
+      planilhaResumo.push(['Saldo utilizado',{v:round2(resumoSaldo.pago),s:S_MONEY}]);
+      planilhaResumo.push(['Saldo disponível',{v:round2(resumoSaldo.disponivel),s:S_MONEY}]);
+      planilhaResumo.push([]);
+      secao('Utilização do saldo semestral — ranking por vínculo');
+      planilhaResumo.push([{v:'Preceptor',s:S_BOLD},{v:'Vínculo',s:S_BOLD},{v:'Saldo inicial',s:S_BOLD},{v:'Valor utilizado',s:S_BOLD},{v:'Valor pago',s:S_BOLD},{v:'Saldo disponível',s:S_BOLD},{v:'Percentual utilizado (%)',s:S_BOLD}]);
+      rankingSaldo.itens.forEach(it=>planilhaResumo.push([it.preceptor,it.vinculo,...celSaldoLinha(it)]));
+      planilhaResumo.push([]);
+      planilhaResumo.push([{v:'Vínculos acima de 80% utilizado',s:S_BOLD},rankingSaldo.acima80]);
+      planilhaResumo.push([{v:'Vínculos com saldo esgotado',s:S_BOLD},rankingSaldo.esgotados]);
+      planilhaResumo.push([{v:'Vínculos sem saldo informado',s:S_BOLD},rankingSaldo.semSaldoQtd]);
+    }
+    const sheets=[{name:'Resumo',headerRows:1,rows:planilhaResumo}];
+    if(exportConteudo.lista){
+      sheets.push({name:'Preceptores',headerRows:1,rows:[
+        ['Preceptor','Competência','Vínculos','Atuações','Turnos','Valor calculado','Valor pago','Situação','Última movimentação','Saldo inicial','Valor utilizado','Valor pago (semestre)','Saldo disponível','Percentual utilizado (%)'],
+        ...lista.map(g=>[g.nome,apuracaoMesLabel(g.mes,g.ano),g.chaves.length,g.atuacoes.length,g.turnos,{v:round2(g.valor),s:S_MONEY},bucketDoGrupo(g)==='pago'?{v:round2(g.valor),s:S_MONEY}:'—',rotuloSituacao(g.sol?.situacao||g.situacao),ultimaMovimentacao(g),...celSaldoLinha(g.saldo)])
+      ]});
+    }
+    if(exportConteudo.composicao){
+      sheets.push({name:'Vínculos',headerRows:1,rows:[
+        ['Preceptor','Competência','Internato/Disciplina','Período','Unidade','Local','Setor','Turnos','Valor','Saldo inicial','Valor utilizado','Valor pago (semestre)','Saldo disponível','Percentual utilizado (%)'],
+        ...atuacoes.map(({grupo,r})=>[grupo.nome,apuracaoMesLabel(grupo.mes,grupo.ano),(r.internato_nome&&r.internato_nome!=='-')?r.internato_nome:(r.disciplina_nome&&r.disciplina_nome!=='-'?r.disciplina_nome:'Atuação'),r.periodo_nome||'—',(r.unidade_nome&&r.unidade_nome!=='-')?r.unidade_nome:'—',r.local_nome||'—',r.setor_nome||'—',Number(r.quantidade_presencas||0),{v:round2(Number(r.total_bruto||0)),s:S_MONEY},...celSaldoLinha(resumoSaldoVinculos([chaveVinculoLinha(r)],mapaSaldos))])
+      ]});
+    }
+    baixarXlsx(`acompanhamento-financeiro-${f.competencia||f.ano||'geral'}.xlsx`,sheets);
+  }
+  function gerarPdf(){
+    const{lista,atuacoes,turnos,calculado,pago}=montarDadosExportacao();
+    const gerado=new Date();
+    const doc=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
+    const W=297,M=14;
+    const altura=()=>doc.internal.pageSize.getHeight();
+    let y=M;
+    const garantir=(h)=>{if(y+h>altura()-M){doc.addPage();y=M+4;}};
+    const tituloSecao=(t,sub)=>{
+      garantir(16);
+      doc.setFillColor(237,242,249);doc.rect(M,y,W-M*2,8,'F');
+      doc.setFillColor(12,35,70);doc.rect(M,y,2.2,8,'F');
+      doc.setFont('helvetica','bold');doc.setFontSize(10.5);doc.setTextColor(12,35,70);
+      doc.text(t,M+5,y+5.6);
+      if(sub){doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(100,110,125);doc.text(sub,W-M-3,y+5.6,{align:'right'});}
+      y+=12;
+    };
+    // Colunas de saldo das tabelas do PDF — mesmos valores da lista (sem CPF/CNPJ).
+    const saldoPdfLinha=(resumoVinculo)=>{
+      const sv=valoresSaldoExport(resumoVinculo);
+      return[
+        typeof sv.saldoInicial==='number'?formatCurrencyBRL(sv.saldoInicial):sv.saldoInicial,
+        formatCurrencyBRL(sv.utilizado),
+        formatCurrencyBRL(sv.pago),
+        typeof sv.disponivel==='number'?formatCurrencyBRL(sv.disponivel):sv.disponivel,
+        sv.percentual==null?'—':`${sv.percentual.toFixed(1).replace('.',',')}%`
+      ];
+    };
+    doc.setFillColor(12,35,70);doc.rect(0,0,W,26,'F');
+    doc.setTextColor(226,183,78);doc.setFont('helvetica','bold');doc.setFontSize(16);
+    doc.text('MEDICINA UNINASSAU',M,12);
+    doc.setTextColor(255,255,255);doc.setFontSize(11);doc.setFont('helvetica','normal');
+    doc.text('Acompanhamento financeiro — Preceptoria',M,20);
+    doc.setFontSize(9);
+    doc.text(`Competência: ${rotuloCompetencia}`,W-M,12,{align:'right'});
+    doc.text(`Gerado em: ${gerado.toLocaleString('pt-BR')}`,W-M,19,{align:'right'});
+    y=33;
+    tituloSecao('Filtros aplicados',`${lista.length} preceptor(es) na lista`);
+    doc.setFontSize(8.5);doc.setTextColor(60,65,75);doc.setFont('helvetica','normal');
+    const linhasFiltro=filtrosAplicados.map(([k,v])=>`${k}: ${v}`);
+    doc.text(linhasFiltro,M+2,y);
+    y+=Math.max(6,linhasFiltro.length*4.4)+4;
+    if(f.busca){doc.setFont('helvetica','italic');doc.setTextColor(100,110,125);doc.text(`Busca textual aplicada: "${f.busca}"`,M+2,y);y+=6;}
+    if(exportConteudo.resumo){
+      tituloSecao('Totais da seleção','valores da seleção atual');
+      autoTable(doc,{
+        startY:y,margin:{left:M,right:M},
+        head:[['Preceptores','Atuações','Turnos confirmados','Valor calculado','Valor pago','Saldo autorizado','Saldo utilizado','Saldo disponível']],
+        body:[[
+          String(lista.length),String(atuacoes.length),String(turnos),
+          formatCurrencyBRL(calculado),formatCurrencyBRL(pago),
+          formatCurrencyBRL(resumoSaldo.saldo),formatCurrencyBRL(resumoSaldo.pago),formatCurrencyBRL(resumoSaldo.disponivel)
+        ]],
+        theme:'grid',styles:{fontSize:7.5,cellPadding:2,overflow:'linebreak'},
+        headStyles:{fillColor:[12,35,70],textColor:[255,255,255],fontStyle:'bold',halign:'center'},
+        bodyStyles:{halign:'center',textColor:[20,30,50]}
+      });
+      y=doc.lastAutoTable.finalY+7;
+      garantir(20);
+      doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(12,35,70);
+      doc.text('Vínculos com maior utilização do saldo',M,y+5);
+      y+=9;
+      if(rankingSaldo.itens.length){
+        autoTable(doc,{
+          startY:y,margin:{left:M,right:M,bottom:M},
+          head:[['Preceptor','Vínculo','Saldo inicial','Valor utilizado','Saldo disponível','Percentual utilizado']],
+          body:rankingSaldo.itens.map(it=>[it.preceptor,it.vinculo,formatCurrencyBRL(it.saldoInicial),formatCurrencyBRL(it.utilizado),formatCurrencyBRL(it.disponivel),percentualSaldoTexto(it)]),
+          theme:'grid',styles:{fontSize:6.5,cellPadding:1.4,overflow:'linebreak'},
+          headStyles:{fillColor:[12,35,70],textColor:[255,255,255],fontStyle:'bold',halign:'center'},
+          columnStyles:{0:{cellWidth:44},1:{cellWidth:76},2:{cellWidth:30,halign:'right'},3:{cellWidth:30,halign:'right'},4:{cellWidth:30,halign:'right'},5:{cellWidth:24,halign:'right'}}
+        });
+        y=doc.lastAutoTable.finalY+7;
+      }else{
+        doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(130,140,155);
+        doc.text('Nenhum vínculo com saldo informado para os filtros selecionados.',M+2,y+5);
+        y+=8;
+      }
+      garantir(14);
+      doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(60,65,75);
+      doc.text(`Vínculos acima de 80% utilizado: ${rankingSaldo.acima80}   •   Vínculos com saldo esgotado: ${rankingSaldo.esgotados}   •   Vínculos sem saldo informado: ${rankingSaldo.semSaldoQtd}`,M,y);
+      y+=8;
+    }
+    if(exportConteudo.lista){
+      tituloSecao('Lista de preceptores','um registro por preceptor e competência');
+      autoTable(doc,{
+        startY:y,margin:{left:M,right:M,bottom:M},
+        head:[['Preceptor','Competência','Vínculos','Atuações','Turnos','Valor calculado','Valor pago','Situação','Última movimentação','Saldo inicial','Valor utilizado','Valor pago (sem.)','Saldo disponível','Percentual utilizado']],
+        body:lista.map(g=>[g.nome,apuracaoMesLabel(g.mes,g.ano),String(g.chaves.length),String(g.atuacoes.length),String(g.turnos),formatCurrencyBRL(g.valor),bucketDoGrupo(g)==='pago'?formatCurrencyBRL(g.valor):'—',rotuloSituacao(g.sol?.situacao||g.situacao),ultimaMovimentacao(g),...saldoPdfLinha(g.saldo)]),
+        theme:'grid',styles:{fontSize:7,cellPadding:1.6,overflow:'linebreak'},
+        headStyles:{fillColor:[12,35,70],textColor:[255,255,255],fontStyle:'bold',halign:'center'},
+        columnStyles:{0:{cellWidth:32},1:{cellWidth:16},2:{cellWidth:9,halign:'center'},3:{cellWidth:9,halign:'center'},4:{cellWidth:9,halign:'center'},5:{cellWidth:19,halign:'right'},6:{cellWidth:19,halign:'right'},7:{cellWidth:20},8:{cellWidth:24},9:{cellWidth:21,halign:'right'},10:{cellWidth:21,halign:'right'},11:{cellWidth:21,halign:'right'},12:{cellWidth:21,halign:'right'},13:{cellWidth:16,halign:'right'}}
+      });
+      y=doc.lastAutoTable.finalY+8;
+    }
+    if(exportConteudo.composicao){
+      tituloSecao('Composição dos vínculos',`${atuacoes.length} atuação(ões)`);
+      autoTable(doc,{
+        startY:y,margin:{left:M,right:M},
+        head:[['Preceptor','Competência','Internato/Disciplina','Período','Unidade','Local','Setor','Turnos','Valor','Saldo inicial','Valor utilizado','Valor pago (sem.)','Saldo disponível','Percentual utilizado']],
+        body:atuacoes.map(({grupo,r})=>[grupo.nome,apuracaoMesLabel(grupo.mes,grupo.ano),(r.internato_nome&&r.internato_nome!=='-')?r.internato_nome:(r.disciplina_nome&&r.disciplina_nome!=='-'?r.disciplina_nome:'Atuação'),r.periodo_nome||'—',(r.unidade_nome&&r.unidade_nome!=='-')?r.unidade_nome:'—',r.local_nome||'—',r.setor_nome||'—',String(Number(r.quantidade_presencas||0)),formatCurrencyBRL(Number(r.total_bruto||0)),...saldoPdfLinha(resumoSaldoVinculos([chaveVinculoLinha(r)],mapaSaldos))]),
+        theme:'grid',styles:{fontSize:6.5,cellPadding:1.4,overflow:'linebreak'},
+        headStyles:{fillColor:[12,35,70],textColor:[255,255,255],fontStyle:'bold',halign:'center'},
+        columnStyles:{0:{cellWidth:22},1:{cellWidth:14},2:{cellWidth:28},3:{cellWidth:12},4:{cellWidth:16},5:{cellWidth:18},6:{cellWidth:14},7:{cellWidth:9,halign:'center'},8:{cellWidth:16,halign:'right'},9:{cellWidth:20,halign:'right'},10:{cellWidth:20,halign:'right'},11:{cellWidth:20,halign:'right'},12:{cellWidth:20,halign:'right'},13:{cellWidth:14,halign:'right'}}
+      });
+      y=doc.lastAutoTable.finalY+8;
+    }
+    garantir(26);
+    doc.setDrawColor(210,218,230);doc.line(M,y,W-M,y);y+=6;
+    doc.setFont('helvetica','bold');doc.setFontSize(9.5);doc.setTextColor(12,35,70);
+    doc.text('Totais',M,y);y+=5.5;
+    doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(50,55,65);
+    doc.text(`Preceptores: ${lista.length}   •   Atuações: ${atuacoes.length}   •   Turnos confirmados: ${turnos}`,M,y);y+=5;
+    doc.text(`Calculado: ${formatCurrencyBRL(calculado)}   •   Pago: ${formatCurrencyBRL(pago)}   •   Saldo disponível: ${formatCurrencyBRL(resumoSaldo.disponivel)}`,M,y);y+=5;
+    doc.setFontSize(7.5);doc.setTextColor(110,120,135);
+    doc.text(`Documento gerado em ${gerado.toLocaleString('pt-BR')} — todos os registros encontrados pela busca e pelos filtros aplicados.`,M,y);
+    const total=doc.getNumberOfPages();
+    for(let p=1;p<=total;p++){
+      doc.setPage(p);
+      doc.setFontSize(7);doc.setTextColor(140,150,165);doc.setFont('helvetica','normal');
+      doc.text(`Página ${p} de ${total}`,W-M,altura()-6,{align:'right'});
+    }
+    doc.save(`acompanhamento-financeiro-${f.competencia||f.ano||'geral'}.pdf`);
+  }
+  const temConteudoSelecionado=exportConteudo.resumo||exportConteudo.lista||exportConteudo.composicao;
+  const executarExportacao=async()=>{
+    if(exportGerando)return;
+    if(!temConteudoSelecionado){setExportErro('Selecione ao menos um conteúdo para exportar.');return;}
+    setExportErro('');setExportGerando(true);
+    try{
+      await new Promise(r=>setTimeout(r,30));
+      if(exportFormato==='excel')gerarExcel();else gerarPdf();
+      setExportAberto(false);
+    }catch(e){
+      console.warn('[acompanhamento][export]',e);
+      setExportErro(e.message||'Não foi possível gerar o arquivo.');
+    }finally{setExportGerando(false);}
+  };
+  // Clique em uma barra do ranking: filtra a lista pelo preceptor e expande o registro dele.
+  const localizarVinculoNaLista=(item)=>{
+    if(!item)return;
+    setF(prev=>({...prev,busca:item.preceptor}));
+    setAbrirPreceptor({id:item.preceptor_id!=null?item.preceptor_id:null,nome:item.preceptor});
+    try{document.getElementById('acompanhamento-lista-preceptores')?.scrollIntoView({block:'start',behavior:'smooth'});}catch(e){/* rolagem é opcional */}
+  };
+  const toggle=(k)=>setAbertos(p=>({...p,[k]:!p[k]}));
+  const cabecalhoComposicao=<div className="dash-comp-linha dash-comp-cab"><span>Internato/Disciplina</span><span>Período</span><span>Unidade</span><span>Local</span><span>Setor</span><span>Turnos</span><strong>Valor</strong><span>Situação</span></div>;
+  const linhaComposicao=(r,turnos,valor)=> {
+    const t=turnos!=null?Number(turnos||0):Number(r.quantidade_presencas||0);
+    const v=valor!=null?Number(valor||0):Number(r.total_bruto||0);
+    return <div className="dash-comp-linha">
+    <span><i>Internato/Disciplina</i>{r.internato_nome&&r.internato_nome!=='-'?r.internato_nome:(r.disciplina_nome&&r.disciplina_nome!=='-'?r.disciplina_nome:'Atuação')}</span>
+    <span><i>Período</i>{r.periodo_nome||'—'}</span>
+    <span><i>Unidade</i>{r.unidade_nome&&r.unidade_nome!=='-'?r.unidade_nome:'—'}</span>
+    <span><i>Local</i>{r.local_nome||'—'}</span>
+    <span><i>Setor</i>{r.setor_nome||'—'}</span>
+    <span><i>Turnos</i>{t} turno{t===1?'':'s'}</span>
+    <strong><i>Valor</i>{formatCurrencyBRL(v)}</strong>
+    <span><i>Situação</i>{rotuloSituacao(r.situacao_nota||'nao_solicitada')}</span>
+  </div>;
+  };
+  // Um bloco por vínculo (a expansão nunca mistura saldos entre vínculos).
+  const vinculosDoGrupo=(g)=>{
+    const mapa=new Map();
+    (g.atuacoes||[]).forEach(r=>{
+      const k=chaveVinculoLinha(r)||`calculo-${r.id}`;
+      const atual=mapa.get(k);
+      if(!atual)mapa.set(k,{chave:k,atuacao:r,turnos:Number(r.quantidade_presencas||0),valor:Number(r.total_bruto||0)});
+      else{atual.turnos+=Number(r.quantidade_presencas||0);atual.valor+=Number(r.total_bruto||0);}
+    });
+    return[...mapa.values()];
+  };
+  const linhaSaldoVinculo=(v)=>{
+    const s=resumoSaldoVinculos([v.chave],mapaSaldos);
+    const excedente=s.temSaldo&&s.disponivel<0;
+    return <div className="dash-saldo-linha">
+      <span className={`dash-saldo-item${s.temSaldo?'':' ni'}`}><i>Saldo inicial</i><b>{s.temSaldo?formatCurrencyBRL(s.saldoInicial):'Saldo não informado'}</b></span>
+      <span className="dash-saldo-item"><i>Valor utilizado</i><b>{formatCurrencyBRL(s.utilizado)}</b></span>
+      <span className="dash-saldo-item"><i>Valor pago</i><b>{formatCurrencyBRL(s.pago)}</b></span>
+      <span className={`dash-saldo-item${s.temSaldo?'':' ni'}${excedente?' excedente':''}`}><i>Saldo disponível</i><b>{s.temSaldo?formatCurrencyBRL(s.disponivel):'Saldo não informado'}</b>{excedente&&<em>Excedente</em>}</span>
+      <span className={`dash-saldo-item${s.temSaldo?'':' ni'}`}><i>Percentual utilizado</i><b>{percentualSaldoTexto(s)}</b></span>
+      <span className="dash-saldo-item dash-saldo-barra-item"><i>Barra de progresso</i>
+        <span className={`dash-saldo-barra faixa-${s.faixa}`} role="img" aria-label={`${percentualSaldoTexto(s)} do saldo utilizado — ${s.situacao}`}><u style={{width:`${larguraBarraSaldo(s)}%`}}/></span>
+      </span>
+    </div>;
+  };
+  const blocoVinculo=(v)=><div className="dash-vinculo-bloco" key={v.chave}>{linhaComposicao(v.atuacao,v.turnos,v.valor)}{linhaSaldoVinculo(v)}</div>;
+  const cabecalhoSaldoGrupo=(g)=>(
+    <div className="dash-saldo-cab">
+      {itensCabecalhoSaldo(g.saldo,g.turnos).map(it=>(
+        <span key={it.rot} className={`dash-saldo-cab-item${it.naoInformado?' ni':''}${it.excedente?' excedente':''}${it.faixa?` faixa-${it.faixa}`:''}`}>
+          <i>{it.rot}</i><b>{it.valor}</b>{it.excedente&&<em>Excedente</em>}
+        </span>
+      ))}
+    </div>
+  );
+  const totalPag=Math.max(1,Math.ceil(registros.length/porPagina));
+  const paginaAtual=Math.min(pagLista,totalPag);
+  const registrosPagina=registros.slice((paginaAtual-1)*porPagina,paginaAtual*porPagina);
+  const rotuloRapido=(ACOMP_RAPIDAS.find(x=>x.k===rapida)||{}).rot||'';
+  const subLista=`${rotuloRapido} — ${f.competencia?new Date(`${f.competencia}-02T12:00:00`).toLocaleDateString('pt-BR',{month:'long',year:'numeric'}):'todas as competências'}`;
+  const vazioLista=saldoFiltro?SALDO_VAZIO[saldoFiltro]:(rapida==='pagos'?'Nenhum preceptor pago na competência selecionada.':(rapida==='todos'?'Nenhum preceptor encontrado para os filtros selecionados.':'Nenhum preceptor nesta situação para os filtros selecionados.'));
+  return <div className="fin-screen dashboard-impact acompanhamento-financeiro"><SearchFilterBar search={f.busca} setSearch={v=>setF(prev=>({...prev,busca:v}))} placeholder="Buscar por nome, CPF, CNPJ, conselho, e-mail..." panelFilters={filtrosPainel} onApplyFilters={aplicarPainel} onClearFilters={limparTodosFiltros} panelOpen={filtrosAbertos} setPanelOpen={setFiltrosAbertos} filters={filtrosDash} rows={rows} emptyLabel="Nenhum preceptor encontrado para os filtros e para a busca selecionados" extraChips={chipsBusca} actions={<button type="button" className="btn dashboard-export" onClick={()=>{setExportErro('');setExportAberto(true);}} disabled={loading}><FileSpreadsheet size={17}/> Exportar relatório</button>}/>{error&&<div className="fin-error">{error}</div>}{loading?<div className="fin-loading"><Loader2 className="spin"/> Carregando...</div>:<>
+    <section className="dashboard-chart-card dashboard-balance-card" title={`Saldo autorizado: ${formatCurrencyBRL(resumoSaldo.saldo)} — Utilizado: ${formatCurrencyBRL(resumoSaldo.pago)} — Disponível: ${formatCurrencyBRL(resumoSaldo.disponivel)}`}>
+      <header><div><small>ORÇAMENTO</small><h3>Utilização do saldo semestral</h3><p>Maiores percentuais utilizados, acima de 80% e saldo esgotado — clique em uma barra para localizar o preceptor na lista</p></div></header>
+      <div className="balance-legend dash-rank-totais">
+        <div><i className="authorized"/><span>Saldo autorizado</span><b>{formatCurrencyBRL(resumoSaldo.saldo)}</b></div>
+        <div><i className="paid"/><span>Utilizado</span><b>{formatCurrencyBRL(resumoSaldo.pago)}</b></div>
+        <div><i className="available"/><span>Disponível</span><b>{formatCurrencyBRL(resumoSaldo.disponivel)}</b></div>
+      </div>
+      {rankingSaldo.itens.length===0?<div className="dash-grafico-vazio">Nenhum vínculo com saldo informado para os filtros selecionados.</div>:
+      <div className="dash-rank-lista">{rankingSaldo.itens.map((it,i)=>(
+        <button type="button" key={it.chave} className="dash-rank-item" onClick={()=>localizarVinculoNaLista(it)}
+          title={`${it.preceptor} — ${it.vinculo} — ${percentualSaldoTexto(it)} do saldo utilizado — clique para localizar o preceptor na lista`}>
+          <span className="dash-rank-topo">
+            <span className="dash-rank-pos">{String(i+1).padStart(2,'0')}</span>
+            <b>{it.preceptor}</b>
+            <span className="dash-rank-vinculo">{it.vinculo}</span>
+            {it.esgotado&&<em className="dash-rank-tag esgotado">Saldo esgotado</em>}
+            {it.acima80&&!it.esgotado&&<em className="dash-rank-tag acima80">Acima de 80%</em>}
+          </span>
+          <span className="dash-rank-vals">
+            <span><i>Saldo inicial</i><b>{formatCurrencyBRL(it.saldoInicial)}</b></span>
+            <span><i>Valor utilizado</i><b>{formatCurrencyBRL(it.utilizado)}</b></span>
+            <span><i>Saldo disponível</i><b>{formatCurrencyBRL(it.disponivel)}</b>{it.disponivel<0&&<em className="dash-rank-exc">Excedente</em>}</span>
+            <span><i>Percentual utilizado</i><b>{percentualSaldoTexto(it)}</b></span>
+          </span>
+          <span className={`dash-saldo-barra faixa-${it.faixa}`}><u style={{width:`${larguraBarraSaldo(it)}%`}}/></span>
+        </button>))}</div>}
+      <div className="dash-rank-resumo">
+        <span>{rankingSaldo.acima80} vínculo(s) acima de 80%</span>
+        <span>{rankingSaldo.esgotados} vínculo(s) com saldo esgotado</span>
+        <span>{rankingSaldo.semSaldoQtd} vínculo{rankingSaldo.semSaldoQtd===1?'':'is'} sem saldo informado</span>
+      </div>
+    </section>
+    <section className="dashboard-chart-card dash-lista-unica" id="acompanhamento-lista-preceptores">
+      <header><div><small>ACOMPANHAMENTO</small><h3>Acompanhamento dos preceptores</h3><p>{subLista} — um registro por preceptor e competência</p></div></header>
+      <div className="dash-filtros-rapidos" role="group" aria-label="Filtros rápidos da lista">
+        {ACOMP_RAPIDAS.map(x=><button key={x.k} type="button" className={`dash-filtro-rapido${rapida===x.k?' ativo':''}`} aria-pressed={rapida===x.k} onClick={()=>setRapida(x.k)}>{x.rot}</button>)}
+      </div>
+      <div className="dash-filtros-rapidos dash-filtros-saldo" role="group" aria-label="Filtros rápidos de saldo da lista">
+        <span className="dash-filtros-saldo-rot">Saldo:</span>
+        {SALDO_FILTROS.map(x=><button key={x.k} type="button" className={`dash-filtro-rapido${saldoFiltro===x.k?' ativo':''}`} aria-pressed={saldoFiltro===x.k} onClick={()=>setSaldoFiltro(cur=>cur===x.k?'':x.k)}>{x.rot}</button>)}
+      </div>
+      {registros.length===0?<div className="dash-vazio">{vazioLista}</div>:<>
+        <div className="dash-tabela-wrap so-desktop"><table className="dash-tabela dash-tabela-unica">
+          <thead><tr><th></th><th>Preceptor</th><th>Competência</th><th>Vínculos</th><th>Turnos</th><th>Valor calculado</th><th>Valor pago</th><th>Situação</th><th>Última movimentação</th><th>Ação</th></tr></thead>
+          <tbody>{registrosPagina.map(g=>{
+            const sit=rotuloSituacao(g.sol?.situacao||g.situacao);
+            const pago=bucketDoGrupo(g)==='pago';
+            return <React.Fragment key={g.chave}>
+              <tr>
+                <td><button type="button" className="dash-expand-btn" onClick={()=>toggle(g.chave)} aria-label="Expandir composição" title="Expandir composição">{abertos[g.chave]?'−':'+'}</button></td>
+                <td><span className="dash-nome-fixo">{g.nome}</span></td>
+                <td>{apuracaoMesLabel(g.mes,g.ano)}</td>
+                <td>{g.chaves.length}</td>
+                <td>{g.turnos}</td>
+                <td>{formatCurrencyBRL(g.valor)}</td>
+                <td>{pago?formatCurrencyBRL(g.valor):'—'}</td>
+                <td>{sit}</td>
+                <td>{ultimaMovimentacao(g)}</td>
+                <td><button type="button" className="dash-btn-controle" onClick={()=>onAbrirControle?.(g.nome,g.mes,g.ano)}>Abrir no Controle financeiro</button></td>
+              </tr>
+              <tr className="dash-saldo-cabecalho"><td colSpan={10}>{cabecalhoSaldoGrupo(g)}</td></tr>
+              {abertos[g.chave]&&<tr className="dash-expandido"><td colSpan={10}><div className="dash-composicao-unica">{cabecalhoComposicao}{vinculosDoGrupo(g).map(blocoVinculo)}</div></td></tr>}
+            </React.Fragment>;})}</tbody>
+        </table></div>
+        <div className="dash-cards-unica so-mobile">{registrosPagina.map(g=>{
+          const sit=rotuloSituacao(g.sol?.situacao||g.situacao);
+          const pago=bucketDoGrupo(g)==='pago';
+          return <article className="dash-card-preceptor" key={g.chave}>
+            <header className="dash-card-preceptor-topo">
+              <button type="button" className="dash-expand-btn" onClick={()=>toggle(g.chave)} aria-label="Expandir composição" title="Expandir composição">{abertos[g.chave]?'−':'+'}</button>
+              <b>{g.nome}</b>
+              <span className="dash-sit-tag">{sit}</span>
+            </header>
+            {cabecalhoSaldoGrupo(g)}
+            <dl className="dash-card-preceptor-vals">
+              <div><dt>Competência</dt><dd>{apuracaoMesLabel(g.mes,g.ano)}</dd></div>
+              <div><dt>Vínculos</dt><dd>{g.chaves.length}</dd></div>
+              <div><dt>Turnos</dt><dd>{g.turnos}</dd></div>
+              <div><dt>Valor calculado</dt><dd>{formatCurrencyBRL(g.valor)}</dd></div>
+              <div><dt>Valor pago</dt><dd>{pago?formatCurrencyBRL(g.valor):'—'}</dd></div>
+              <div className="dash-card-mov"><dt>Última movimentação</dt><dd>{ultimaMovimentacao(g)}</dd></div>
+            </dl>
+            {abertos[g.chave]&&<div className="dash-composicao-unica">{cabecalhoComposicao}{vinculosDoGrupo(g).map(blocoVinculo)}</div>}
+            <button type="button" className="dash-btn-controle" onClick={()=>onAbrirControle?.(g.nome,g.mes,g.ano)}>Abrir no Controle financeiro</button>
+          </article>;})}</div>
+        <div className="dash-paginacao">
+          <span className="dash-paginacao-info">{registros.length} registro{registros.length===1?'':'s'} • Página {paginaAtual} de {totalPag}</span>
+          <label className="dash-paginacao-tamanho">Por página
+            <select value={porPagina} onChange={e=>setPorPagina(Number(e.target.value))} aria-label="Registros por página">
+              {[20,50,100].map(n=><option key={n} value={n}>{n}</option>)}
+            </select>
+          </label>
+          <div className="dash-paginacao-botoes">
+            <button type="button" onClick={()=>setPagLista(1)} disabled={paginaAtual<=1} aria-label="Primeira página">«</button>
+            <button type="button" onClick={()=>setPagLista(p=>Math.max(1,p-1))} disabled={paginaAtual<=1} aria-label="Página anterior">‹ Anterior</button>
+            <button type="button" onClick={()=>setPagLista(p=>Math.min(totalPag,p+1))} disabled={paginaAtual>=totalPag} aria-label="Próxima página">Próxima ›</button>
+            <button type="button" onClick={()=>setPagLista(totalPag)} disabled={paginaAtual>=totalPag} aria-label="Última página">»</button>
+          </div>
+        </div>
+      </>}
+    </section>
+  </>}
+  {exportAberto&&<div className="system-dialog-overlay" onMouseDown={e=>{if(e.target===e.currentTarget&&!exportGerando)setExportAberto(false)}}>
+    <section className="system-dialog dash-export-dialog" role="dialog" aria-modal="true" aria-labelledby="acompanhamento-export-titulo">
+      <header className="system-dialog-header">
+        <div className="system-dialog-icon"><FileSpreadsheet size={20}/></div>
+        <div className="system-dialog-titulo"><small>ACOMPANHAMENTO FINANCEIRO</small><h3 id="acompanhamento-export-titulo">Exportar relatório</h3></div>
+        <button type="button" className="system-dialog-fechar" onClick={()=>setExportAberto(false)} disabled={exportGerando} aria-label="Fechar"><X size={18}/></button>
+      </header>
+      <div className="system-dialog-body">
+        <div className="dash-export-campo">
+          <b>Formato do arquivo</b>
+          <div className="dash-export-opcoes" role="radiogroup" aria-label="Formato do arquivo">
+            {[['excel','Excel (.xlsx)'],['pdf','PDF']].map(([v,rot])=><label key={v} className={`dash-export-opcao${exportFormato===v?' ativo':''}`}><input type="radio" name="acompanhamento-export-formato" checked={exportFormato===v} onChange={()=>setExportFormato(v)} disabled={exportGerando}/><span>{rot}</span></label>)}
+          </div>
+        </div>
+        <div className="dash-export-campo">
+          <b>Conteúdo do relatório</b>
+          <div className="dash-export-checks">
+            {[['resumo','Resumo e saldos'],['lista','Lista de preceptores'],['composicao','Composição dos vínculos']].map(([k,rot])=><label key={k} className="dash-export-check"><input type="checkbox" checked={!!exportConteudo[k]} onChange={e=>setExportConteudo(c=>({...c,[k]:e.target.checked}))} disabled={exportGerando}/><span>{rot}</span></label>)}
+          </div>
+        </div>
+        <div className="dash-export-resumo">
+          <p>Busca: <b>{f.busca?`"${f.busca}"`:'—'}</b></p>
+          <p>{registros.length} preceptor{registros.length===1?'':'es'} • {registros.reduce((a,g)=>a+g.atuacoes.length,0)} atuação{registros.reduce((a,g)=>a+g.atuacoes.length,0)===1?'ões':''}</p>
+          <p>{filtrosAplicados.filter(([k])=>k!=='Filtros').map(([k,v])=>`${k}: ${v}`).join(' • ')||'Nenhum filtro aplicado'}</p>
+        </div>
+        <p className="dash-export-nota">A exportação usa exatamente a busca textual e os filtros aplicados, incluindo os registros que não estão na página visível da lista. CPF e CNPJ não são incluídos.</p>
+        {exportErro&&<div className="dash-export-erro"><AlertCircle size={16}/><span>{exportErro}</span></div>}
+      </div>
+      <footer className="system-dialog-footer">
+        <button type="button" className="btn secondary" onClick={()=>setExportAberto(false)} disabled={exportGerando}>Cancelar</button>
+        <button type="button" className="btn" onClick={executarExportacao} disabled={exportGerando||!temConteudoSelecionado||loading}>
+          {exportGerando?<><Loader2 size={16} className="spin"/> Gerando...</>:<><Download size={16}/> Exportar</>}
+        </button>
+      </footer>
+    </section>
+  </div>}
+  </div>;
+}
+
 function DashboardPage({onAbrirControle}){
- const now=new Date(),[rows,setRows]=useState([]),[solsMap,setSolsMap]=useState({}),[pagDatas,setPagDatas]=useState({}),[revisoes,setRevisoes]=useState({}),[loading,setLoading]=useState(true),[error,setError]=useState(''),[abertos,setAbertos]=useState({}),[rapida,setRapida]=useState('pagos'),[pagLista,setPagLista]=useState(1),[porPagina,setPorPagina]=useState(20),[f,setF]=useState({competencia:`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`,mes:'',ano:'',busca:'',unidade:'',internato:'',local:'',status:''});
+ const now=new Date(),[rows,setRows]=useState([]),[solsMap,setSolsMap]=useState({}),[pagDatas,setPagDatas]=useState({}),[revisoes,setRevisoes]=useState({}),[loading,setLoading]=useState(true),[error,setError]=useState(''),[rapida,setRapida]=useState('pagos'),[f,setF]=useState({competencia:`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`,mes:'',ano:'',busca:'',unidade:'',internato:'',local:'',status:''});
  const[filtrosAbertos,setFiltrosAbertos]=useState(false);
  const[exportAberto,setExportAberto]=useState(false);
  const[exportFormato,setExportFormato]=useState('excel');
@@ -2742,7 +3507,6 @@ function DashboardPage({onAbrirControle}){
  const[exportGerando,setExportGerando]=useState(false);
  const[exportErro,setExportErro]=useState('');
  const[saldoFiltro,setSaldoFiltro]=useState('');
- const[abrirPreceptor,setAbrirPreceptor]=useState(null);
  useEffect(()=>{
   let vivo=true;
   setLoading(true);setError('');
@@ -2762,7 +3526,6 @@ function DashboardPage({onAbrirControle}){
    .finally(()=>{if(vivo)setLoading(false);});
   return()=>{vivo=false;};
   },[]);
-  useEffect(()=>{setPagLista(1);},[f,rapida,porPagina,saldoFiltro]);
   const data=useMemo(()=>filtrarFinanceiro(rows,f),[rows,f]);
   // Saldo semestral por vínculo (fonte: fila financeira inteira — semestre do vínculo).
   const mapaSaldos=useMemo(()=>montarMapaSaldosVinculos(rows),[rows]);
@@ -2867,14 +3630,6 @@ function DashboardPage({onAbrirControle}){
   if(!saldoFiltro)return base;
   return base.filter(g=>passaFiltroSaldo(g.saldo,saldoFiltro));
  },[grupos,rapida,gruposPendencia,saldoFiltro]);
-  // Clique na barra do gráfico: expande o registro do preceptor assim que a lista o contém.
-  useEffect(()=>{
-   if(!abrirPreceptor)return;
-   const alvo=abrirPreceptor;
-   const chaves=registros.filter(g=>(alvo.id!=null&&g.preceptor_id===alvo.id)||g.nome===alvo.nome).map(g=>g.chave);
-   if(chaves.length)setAbertos(p=>{const n={...p};chaves.forEach(k=>{n[k]=true});return n;});
-   setAbrirPreceptor(null);
-  },[abrirPreceptor,registros]);
  const resumo=useMemo(()=>{
     const saldos={};
     data.forEach(r=>{const k=r.vinculo_internato_id||r.vinculo_adm_id;if(k&&!saldos[k])saldos[k]=Number(r.saldo_semestral||0)});
@@ -3383,71 +4138,9 @@ function DashboardPage({onAbrirControle}){
     }finally{setExportGerando(false);}
   };
   const percentualPago=resumo.saldo>0?Math.min(100,Math.max(0,(resumo.pago/resumo.saldo)*100)):0;
-  // Clique em uma barra do ranking: filtra a lista pelo preceptor e expande o registro dele.
-  const localizarVinculoNaLista=(item)=>{
-    if(!item)return;
-    setF(prev=>({...prev,busca:item.preceptor}));
-    setAbrirPreceptor({id:item.preceptor_id!=null?item.preceptor_id:null,nome:item.preceptor});
-    try{document.getElementById('dash-lista-preceptores')?.scrollIntoView({block:'start',behavior:'smooth'});}catch(e){/* rolagem é opcional */}
-  };
-  const toggle=(k)=>setAbertos(p=>({...p,[k]:!p[k]}));
-  const cabecalhoComposicao=<div className="dash-comp-linha dash-comp-cab"><span>Internato/Disciplina</span><span>Período</span><span>Unidade</span><span>Local</span><span>Setor</span><span>Turnos</span><strong>Valor</strong><span>Situação</span></div>;
-  const linhaComposicao=(r,turnos,valor)=> {
-    const t=turnos!=null?Number(turnos||0):Number(r.quantidade_presencas||0);
-    const v=valor!=null?Number(valor||0):Number(r.total_bruto||0);
-    return <div className="dash-comp-linha">
-    <span><i>Internato/Disciplina</i>{r.internato_nome&&r.internato_nome!=='-'?r.internato_nome:(r.disciplina_nome&&r.disciplina_nome!=='-'?r.disciplina_nome:'Atuação')}</span>
-    <span><i>Período</i>{r.periodo_nome||'—'}</span>
-    <span><i>Unidade</i>{r.unidade_nome&&r.unidade_nome!=='-'?r.unidade_nome:'—'}</span>
-    <span><i>Local</i>{r.local_nome||'—'}</span>
-    <span><i>Setor</i>{r.setor_nome||'—'}</span>
-    <span><i>Turnos</i>{t} turno{t===1?'':'s'}</span>
-    <strong><i>Valor</i>{formatCurrencyBRL(v)}</strong>
-    <span><i>Situação</i>{rotuloSituacao(r.situacao_nota||'nao_solicitada')}</span>
-  </div>;
-  };
-  // Um bloco por vínculo (a expansão nunca mistura saldos entre vínculos).
-  const vinculosDoGrupo=(g)=>{
-    const mapa=new Map();
-    (g.atuacoes||[]).forEach(r=>{
-      const k=chaveVinculoLinha(r)||`calculo-${r.id}`;
-      const atual=mapa.get(k);
-      if(!atual)mapa.set(k,{chave:k,atuacao:r,turnos:Number(r.quantidade_presencas||0),valor:Number(r.total_bruto||0)});
-      else{atual.turnos+=Number(r.quantidade_presencas||0);atual.valor+=Number(r.total_bruto||0);}
-    });
-    return[...mapa.values()];
-  };
-  const linhaSaldoVinculo=(v)=>{
-    const s=resumoSaldoVinculos([v.chave],mapaSaldos);
-    const excedente=s.temSaldo&&s.disponivel<0;
-    return <div className="dash-saldo-linha">
-      <span className={`dash-saldo-item${s.temSaldo?'':' ni'}`}><i>Saldo inicial</i><b>{s.temSaldo?formatCurrencyBRL(s.saldoInicial):'Saldo não informado'}</b></span>
-      <span className="dash-saldo-item"><i>Valor utilizado</i><b>{formatCurrencyBRL(s.utilizado)}</b></span>
-      <span className="dash-saldo-item"><i>Valor pago</i><b>{formatCurrencyBRL(s.pago)}</b></span>
-      <span className={`dash-saldo-item${s.temSaldo?'':' ni'}${excedente?' excedente':''}`}><i>Saldo disponível</i><b>{s.temSaldo?formatCurrencyBRL(s.disponivel):'Saldo não informado'}</b>{excedente&&<em>Excedente</em>}</span>
-      <span className={`dash-saldo-item${s.temSaldo?'':' ni'}`}><i>Percentual utilizado</i><b>{percentualSaldoTexto(s)}</b></span>
-      <span className="dash-saldo-item dash-saldo-barra-item"><i>Barra de progresso</i>
-        <span className={`dash-saldo-barra faixa-${s.faixa}`} role="img" aria-label={`${percentualSaldoTexto(s)} do saldo utilizado — ${s.situacao}`}><u style={{width:`${larguraBarraSaldo(s)}%`}}/></span>
-      </span>
-    </div>;
-  };
-  const blocoVinculo=(v)=><div className="dash-vinculo-bloco" key={v.chave}>{linhaComposicao(v.atuacao,v.turnos,v.valor)}{linhaSaldoVinculo(v)}</div>;
-  const cabecalhoSaldoGrupo=(g)=>(
-    <div className="dash-saldo-cab">
-      {itensCabecalhoSaldo(g.saldo,g.turnos).map(it=>(
-        <span key={it.rot} className={`dash-saldo-cab-item${it.naoInformado?' ni':''}${it.excedente?' excedente':''}${it.faixa?` faixa-${it.faixa}`:''}`}>
-          <i>{it.rot}</i><b>{it.valor}</b>{it.excedente&&<em>Excedente</em>}
-        </span>
-      ))}
-    </div>
-  );
-  const totalPag=Math.max(1,Math.ceil(registros.length/porPagina));
-  const paginaAtual=Math.min(pagLista,totalPag);
-  const registrosPagina=registros.slice((paginaAtual-1)*porPagina,paginaAtual*porPagina);
   const competenciaVigente=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
   const rotuloRapido=(RAPIDAS.find(x=>x.k===rapida)||{}).rot||'';
   const subLista=rapida==='pagos'&&f.competencia===competenciaVigente?'Preceptores pagos no mês vigente':`${rotuloRapido} — ${f.competencia?new Date(`${f.competencia}-02T12:00:00`).toLocaleDateString('pt-BR',{month:'long',year:'numeric'}):'todas as competências'}`;
-  const vazioLista=saldoFiltro?SALDO_VAZIO[saldoFiltro]:(rapida==='pagos'?'Nenhum preceptor pago na competência selecionada.':(rapida==='todos'?'Nenhum preceptor encontrado para os filtros selecionados.':'Nenhum preceptor nesta situação para os filtros selecionados.'));
   return <div className="fin-screen dashboard-impact"><SearchFilterBar search={f.busca} setSearch={v=>setF(prev=>({...prev,busca:v}))} placeholder="Buscar preceptor, e-mail, conselho, internato, unidade ou local" panelFilters={filtrosPainel} onApplyFilters={aplicarPainel} onClearFilters={limparTodosFiltros} panelOpen={filtrosAbertos} setPanelOpen={setFiltrosAbertos} filters={filtrosDash} rows={rows} emptyLabel="Nenhum preceptor encontrado para os filtros e para a busca selecionados" extraChips={chipsBusca} actions={<button type="button" className="btn dashboard-export" onClick={()=>{setExportErro('');setExportAberto(true);}} disabled={loading}><FileSpreadsheet size={17}/> Exportar relatório</button>}/>{error&&<div className="fin-error">{error}</div>}{loading?<div className="fin-loading"><Loader2 className="spin"/> Carregando...</div>:<>
    <section className="dashboard-hero"><div><small>VISAO FINANCEIRA DO INTERNATO</small><h2>{f.competencia?new Date(`${f.competencia}-02T12:00:00`).toLocaleDateString('pt-BR',{month:'long',year:'numeric'}):'Todas as competencias'}</h2><p>Pagamentos sao registrados apos a confirmacao do e-mail, individualmente ou em lote. O saldo disponivel e atualizado automaticamente.</p></div><div className="dashboard-hero-value"><span>Saldo disponível</span><strong>{formatCurrencyBRL(resumo.disponivel)}</strong><small>{percentualPago.toFixed(1).replace('.',',')}% do saldo utilizado</small></div></section>
    <section className="dashboard-chart-card dashboard-indicadores-card">
@@ -3545,111 +4238,10 @@ function DashboardPage({onAbrirControle}){
           <b>{s.qtd}</b>
         </div>;})}</div>}
     </section>
-    <section className="dashboard-chart-card dashboard-balance-card dash-grafico dash-grafico-span" title={`Saldo autorizado: ${formatCurrencyBRL(resumo.saldo)} — Utilizado: ${formatCurrencyBRL(resumo.pago)} — Disponível: ${formatCurrencyBRL(resumo.disponivel)}`}>
-      <header><div><small>ORÇAMENTO</small><h3>Utilização do saldo semestral</h3><p>Maiores percentuais utilizados, acima de 80% e saldo esgotado — clique em uma barra para localizar o preceptor na lista</p></div></header>
-      <div className="balance-legend dash-rank-totais">
-        <div><i className="authorized"/><span>Saldo autorizado</span><b>{formatCurrencyBRL(resumo.saldo)}</b></div>
-        <div><i className="paid"/><span>Utilizado</span><b>{formatCurrencyBRL(resumo.pago)}</b></div>
-        <div><i className="available"/><span>Disponível</span><b>{formatCurrencyBRL(resumo.disponivel)}</b></div>
-      </div>
-      {rankingSaldo.itens.length===0?<div className="dash-grafico-vazio">Nenhum vínculo com saldo informado para os filtros selecionados.</div>:
-      <div className="dash-rank-lista">{rankingSaldo.itens.map((it,i)=>(
-        <button type="button" key={it.chave} className="dash-rank-item" onClick={()=>localizarVinculoNaLista(it)}
-          title={`${it.preceptor} — ${it.vinculo} — ${percentualSaldoTexto(it)} do saldo utilizado — clique para localizar o preceptor na lista`}>
-          <span className="dash-rank-topo">
-            <span className="dash-rank-pos">{String(i+1).padStart(2,'0')}</span>
-            <b>{it.preceptor}</b>
-            <span className="dash-rank-vinculo">{it.vinculo}</span>
-            {it.esgotado&&<em className="dash-rank-tag esgotado">Saldo esgotado</em>}
-            {it.acima80&&!it.esgotado&&<em className="dash-rank-tag acima80">Acima de 80%</em>}
-          </span>
-          <span className="dash-rank-vals">
-            <span><i>Saldo inicial</i><b>{formatCurrencyBRL(it.saldoInicial)}</b></span>
-            <span><i>Valor utilizado</i><b>{formatCurrencyBRL(it.utilizado)}</b></span>
-            <span><i>Saldo disponível</i><b>{formatCurrencyBRL(it.disponivel)}</b>{it.disponivel<0&&<em className="dash-rank-exc">Excedente</em>}</span>
-            <span><i>Percentual utilizado</i><b>{percentualSaldoTexto(it)}</b></span>
-          </span>
-          <span className={`dash-saldo-barra faixa-${it.faixa}`}><u style={{width:`${larguraBarraSaldo(it)}%`}}/></span>
-        </button>))}</div>}
-      <div className="dash-rank-resumo">
-        <span>{rankingSaldo.acima80} vínculo(s) acima de 80%</span>
-        <span>{rankingSaldo.esgotados} vínculo(s) com saldo esgotado</span>
-        <span>{rankingSaldo.semSaldoQtd} vínculo{rankingSaldo.semSaldoQtd===1?'':'is'} sem saldo informado</span>
-      </div>
-    </section>
+    
    </section>
    <section className="dashboard-fiscal-flow"><header><div><small>FLUXO SIMPLIFICADO</small><h3>Acompanhamento do pagamento</h3><p>Cálculo conferido, preparar e-mail, marcar e-mail enviado e pagar individualmente ou em lote.</p></div></header><div className="fiscal-steps"><div className={resumo.fluxo.emailNaoEnviado?'pending':''}><span><Mail/></span><b>{resumo.fluxo.emailNaoEnviado}</b><strong>E-mail não enviado</strong><small>Cálculo conferido ou e-mail preparado, envio ainda não confirmado</small></div><div className={resumo.fluxo.naoPagos?'active':''}><span><Send/></span><b>{resumo.fluxo.naoPagos}</b><strong>Não pagos</strong><small>E-mail confirmado como enviado, pagamento ainda não registrado</small></div><div className={resumo.fluxo.pagos?'done':''}><span><CircleDollarSign/></span><b>{resumo.fluxo.pagos}</b><strong>Pagos</strong><small>Pagamento registrado individualmente ou em lote</small></div></div></section>
-   <section className="dashboard-chart-card dash-lista-unica" id="dash-lista-preceptores">
-     <header><div><small>ACOMPANHAMENTO</small><h3>Acompanhamento dos preceptores</h3><p>{subLista} — um registro por preceptor e competência</p></div></header>
-      <div className="dash-filtros-rapidos" role="group" aria-label="Filtros rápidos da lista">
-        {RAPIDAS.map(x=><button key={x.k} type="button" className={`dash-filtro-rapido${rapida===x.k?' ativo':''}`} aria-pressed={rapida===x.k} onClick={()=>setRapida(x.k)}>{x.rot}</button>)}
-      </div>
-      <div className="dash-filtros-rapidos dash-filtros-saldo" role="group" aria-label="Filtros rápidos de saldo da lista">
-        <span className="dash-filtros-saldo-rot">Saldo:</span>
-        {SALDO_FILTROS.map(x=><button key={x.k} type="button" className={`dash-filtro-rapido${saldoFiltro===x.k?' ativo':''}`} aria-pressed={saldoFiltro===x.k} onClick={()=>setSaldoFiltro(cur=>cur===x.k?'':x.k)}>{x.rot}</button>)}
-      </div>
-     {registros.length===0?<div className="dash-vazio">{vazioLista}</div>:<>
-       <div className="dash-tabela-wrap so-desktop"><table className="dash-tabela dash-tabela-unica">
-         <thead><tr><th></th><th>Preceptor</th><th>Competência</th><th>Atuações</th><th>Turnos</th><th>Valor calculado</th><th>Valor pago</th><th>Situação</th><th>Última movimentação</th><th>Ação</th></tr></thead>
-         <tbody>{registrosPagina.map(g=>{
-           const sit=rotuloSituacao(g.sol?.situacao||g.situacao);
-           const pago=bucketDoGrupo(g)==='pago';
-           return <React.Fragment key={g.chave}>
-             <tr>
-               <td><button type="button" className="dash-expand-btn" onClick={()=>toggle(g.chave)} aria-label="Expandir composição" title="Expandir composição">{abertos[g.chave]?'−':'+'}</button></td>
-               <td><span className="dash-nome-fixo">{g.nome}</span></td>
-               <td>{apuracaoMesLabel(g.mes,g.ano)}</td>
-               <td>{g.atuacoes.length}</td>
-               <td>{g.turnos}</td>
-               <td>{formatCurrencyBRL(g.valor)}</td>
-
-               <td>{pago?formatCurrencyBRL(g.valor):'—'}</td>
-               <td>{sit}</td>
-               <td>{ultimaMovimentacao(g)}</td>
-                <td><button type="button" className="dash-btn-controle" onClick={()=>onAbrirControle?.(g.nome,g.mes,g.ano)}>Abrir no Controle financeiro</button></td>
-              </tr>
-              <tr className="dash-saldo-cabecalho"><td colSpan={10}>{cabecalhoSaldoGrupo(g)}</td></tr>
-              {abertos[g.chave]&&<tr className="dash-expandido"><td colSpan={10}><div className="dash-composicao-unica">{cabecalhoComposicao}{vinculosDoGrupo(g).map(blocoVinculo)}</div></td></tr>}
-            </React.Fragment>;})}</tbody>
-       </table></div>
-       <div className="dash-cards-unica so-mobile">{registrosPagina.map(g=>{
-         const sit=rotuloSituacao(g.sol?.situacao||g.situacao);
-         const pago=bucketDoGrupo(g)==='pago';
-         return <article className="dash-card-preceptor" key={g.chave}>
-           <header className="dash-card-preceptor-topo">
-             <button type="button" className="dash-expand-btn" onClick={()=>toggle(g.chave)} aria-label="Expandir composição" title="Expandir composição">{abertos[g.chave]?'−':'+'}</button>
-             <b>{g.nome}</b>
-              <span className="dash-sit-tag">{sit}</span>
-            </header>
-            {cabecalhoSaldoGrupo(g)}
-            <dl className="dash-card-preceptor-vals">
-             <div><dt>Competência</dt><dd>{apuracaoMesLabel(g.mes,g.ano)}</dd></div>
-             <div><dt>Atuações</dt><dd>{g.atuacoes.length}</dd></div>
-             <div><dt>Turnos</dt><dd>{g.turnos}</dd></div>
-             <div><dt>Valor calculado</dt><dd>{formatCurrencyBRL(g.valor)}</dd></div>
-
-             <div><dt>Valor pago</dt><dd>{pago?formatCurrencyBRL(g.valor):'—'}</dd></div>
-             <div className="dash-card-mov"><dt>Última movimentação</dt><dd>{ultimaMovimentacao(g)}</dd></div>
-           </dl>
-            {abertos[g.chave]&&<div className="dash-composicao-unica">{cabecalhoComposicao}{vinculosDoGrupo(g).map(blocoVinculo)}</div>}
-           <button type="button" className="dash-btn-controle" onClick={()=>onAbrirControle?.(g.nome,g.mes,g.ano)}>Abrir no Controle financeiro</button>
-         </article>;})}</div>
-       <div className="dash-paginacao">
-         <span className="dash-paginacao-info">{registros.length} registro{registros.length===1?'':'s'} • Página {paginaAtual} de {totalPag}</span>
-         <label className="dash-paginacao-tamanho">Por página
-           <select value={porPagina} onChange={e=>setPorPagina(Number(e.target.value))} aria-label="Registros por página">
-             {[20,50,100].map(n=><option key={n} value={n}>{n}</option>)}
-           </select>
-         </label>
-         <div className="dash-paginacao-botoes">
-           <button type="button" onClick={()=>setPagLista(1)} disabled={paginaAtual<=1} aria-label="Primeira página">«</button>
-           <button type="button" onClick={()=>setPagLista(p=>Math.max(1,p-1))} disabled={paginaAtual<=1} aria-label="Página anterior">‹ Anterior</button>
-           <button type="button" onClick={()=>setPagLista(p=>Math.min(totalPag,p+1))} disabled={paginaAtual>=totalPag} aria-label="Próxima página">Próxima ›</button>
-           <button type="button" onClick={()=>setPagLista(totalPag)} disabled={paginaAtual>=totalPag} aria-label="Última página">»</button>
-         </div>
-       </div>
-     </>}
-    </section>
+   
    </>}
    {exportAberto&&<div className="system-dialog-overlay" onMouseDown={e=>{if(e.target===e.currentTarget&&!exportGerando)setExportAberto(false)}}>
      <section className="system-dialog dash-export-dialog" role="dialog" aria-modal="true" aria-labelledby="dash-export-titulo">
@@ -3950,6 +4542,127 @@ export default function App({forceLogin=false}){
   const [pagLoteFiltro, setPagLoteFiltro] = useState("todos");
   const [pagLoteExecutando, setPagLoteExecutando] = useState(false);
 
+  // Recuperação de Acesso Administrativa
+  const [solicitacoesRecup, setSolicitacoesRecup] = useState([]);
+  const [solicitacoesRecupLoading, setSolicitacoesRecupLoading] = useState(false);
+  const [modalConfigResponsavel, setModalConfigResponsavel] = useState(false);
+  const [modalRestaurarAcesso, setModalRestaurarAcesso] = useState(null);
+  const [restaurandoExecutando, setRestaurandoExecutando] = useState(false);
+  const [dadosConfigResp, setDadosConfigResp] = useState([
+    { id: null, nome_responsavel: "", email_responsavel: "", ativo: true }
+  ]);
+  const [salvandoConfigResp, setSalvandoConfigResp] = useState(false);
+
+  const carregarSolicitacoesRecuperacao = useCallback(async () => {
+    if (!userRoles.includes("admin")) return;
+    setSolicitacoesRecupLoading(true);
+    try {
+      const data = await listarSolicitacoesRecuperacaoAcesso();
+      setSolicitacoesRecup(data || []);
+    } catch (e) {
+      console.warn("Erro ao carregar solicitações de recuperação:", e);
+    } finally {
+      setSolicitacoesRecupLoading(false);
+    }
+  }, [userRoles]);
+
+  const abrirModalConfigResponsavel = async () => {
+    try {
+      const contatos = await listarConfigsResponsaveisRecuperacao();
+      if (Array.isArray(contatos) && contatos.length > 0) {
+        setDadosConfigResp(contatos.map(c => ({
+          id: c.id || null,
+          nome_responsavel: c.nome_responsavel || "",
+          email_responsavel: c.email_responsavel || "",
+          ativo: c.ativo ?? true
+        })));
+      } else {
+        setDadosConfigResp([{ id: null, nome_responsavel: "", email_responsavel: "", ativo: true }]);
+      }
+      setModalConfigResponsavel(true);
+    } catch (e) {
+      notify("Erro ao buscar configuração dos responsáveis: " + e.message, "error");
+    }
+  };
+
+  const handleAdicionarResponsavelConfig = () => {
+    setDadosConfigResp(prev => [
+      ...prev,
+      { id: null, nome_responsavel: "", email_responsavel: "", ativo: true }
+    ]);
+  };
+
+  const handleRemoverResponsavelConfig = (idx) => {
+    if (dadosConfigResp.length <= 1) {
+      notify("Mantenha pelo menos um responsável configurado.", "warn");
+      return;
+    }
+    setDadosConfigResp(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleAtualizarResponsavelConfig = (idx, campo, valor) => {
+    setDadosConfigResp(prev => prev.map((item, i) => i === idx ? { ...item, [campo]: valor } : item));
+  };
+
+  const handleSalvarConfigResponsavel = async (e) => {
+    e.preventDefault();
+    const contatosValidos = dadosConfigResp.filter(c => c.nome_responsavel?.trim() || c.email_responsavel?.trim());
+    if (contatosValidos.length === 0) {
+      notify("Informe pelo menos um responsável com nome e e-mail.", "error");
+      return;
+    }
+    for (const c of contatosValidos) {
+      if (!c.nome_responsavel?.trim() || !c.email_responsavel?.trim()) {
+        notify("Preencha o nome e o e-mail de todos os responsáveis adicionados.", "error");
+        return;
+      }
+    }
+    setSalvandoConfigResp(true);
+    try {
+      await salvarConfigResponsavelRecuperacao(contatosValidos);
+      notify("Responsáveis institucionais salvos com sucesso!");
+      setModalConfigResponsavel(false);
+    } catch (err) {
+      notify("Erro ao salvar responsáveis: " + err.message, "error");
+    } finally {
+      setSalvandoConfigResp(false);
+    }
+  };
+
+  const abrirModalRestaurar = (usuario, solicitacaoId = null, codigoExistente = null) => {
+    const codigo = codigoExistente || usuario?.codigo_temporario || usuario?.codigo_temporario_acesso || '';
+    setModalRestaurarAcesso({
+      user: usuario,
+      solicitacaoId,
+      step: codigo ? 'done' : 'confirm',
+      novoCodigo: codigo,
+      copiado: false
+    });
+  };
+
+  const executarRestauracaoAcesso = async () => {
+    if (!modalRestaurarAcesso?.user?.profile_id) return;
+    setRestaurandoExecutando(true);
+    try {
+      const res = await restaurarAcessoUsuarioViaEdge({
+        profile_id: modalRestaurarAcesso.user.profile_id,
+        solicitacao_id: modalRestaurarAcesso.solicitacaoId || null
+      });
+      setModalRestaurarAcesso(prev => ({
+        ...prev,
+        step: 'done',
+        novoCodigo: res.codigo_temporario || res.senha_temporaria || ''
+      }));
+      notify("Acesso restaurado com sucesso!");
+      loadPage();
+      carregarSolicitacoesRecuperacao();
+    } catch (e) {
+      notify("Erro ao restaurar acesso: " + (e.message || "Tente novamente"), "error");
+    } finally {
+      setRestaurandoExecutando(false);
+    }
+  };
+
   const carregarSolicitacoesFiscais = useCallback(async () => {
     setSolicitacoesFiscaisCarregando(true);
     try {
@@ -4249,7 +4962,7 @@ export default function App({forceLogin=false}){
         }
         case"registrar-presencas":{setRows([]);break}
         case"presencas":{setRows((await fetchFolhaPresenca()).filter(r=>r.tipo_atuacao==="internato"));break}
-        case"regras":{setRows((await fetchRegrasFinanceiras()).filter(r=>r.tipo_atuacao==="internato").map(r=>({...r,tipo_atuacao_label:r.tipo_atuacao==="adm"?"Prática":"Internato"})));break}
+        case"regras":{setRows((await fetchRegrasFinanceiras()).filter(r=>r.tipo_atuacao==="internato").map(r=>({...r,tipo_atuacao_label:"Internato"})));break}
         case"controle-financeiro":{break}
         case"apuracao-mensal":{setPage("controle-financeiro");return}
         case"pagamentos":{setPage("controle-financeiro");return}
@@ -4265,12 +4978,14 @@ export default function App({forceLogin=false}){
             if(!r.ativo)situacao_usuario=r.motivo_bloqueio_inativacao?"Bloqueado":"Inativo";
             else if(r.primeiro_acesso_pendente)situacao_usuario="Pendente";
             return{...r,perfil_label:roles.map(rol=>ROLE_LBL[rol]||rol),situacao_usuario};
-          }));break}
+          }));
+          carregarSolicitacoesRecuperacao();
+          break}
         default:{setRows([]);break}
       }
     }catch(e){setErrorData(e.message||"Erro ao carregar dados");}
     setLoadingData(false);
-  },[page,session]);
+  },[page,session,carregarSolicitacoesRecuperacao]);
 
   useEffect(()=>{loadPage()},[loadPage]);
 
@@ -4353,6 +5068,8 @@ export default function App({forceLogin=false}){
           base.local_id=vinc.local_id||"";
           base.setor_id=vinc.setor_id||"";
           base.unidade_vinculo_id=vinc.unidade_id||"";
+          base.vinculo_agencia=vinc.agencia||"";
+          base.vinculo_conta=vinc.conta||"";
           if(page==="preceptores-pratica"){
             base.disciplina_id=vinc.disciplina_id||"";
           }else{
@@ -4449,7 +5166,6 @@ export default function App({forceLogin=false}){
       {key:"unidade_nome",label:"Unidade"},
     ],
     regras:[
-      {key:"tipo_atuacao_label",label:"Tipo de atuação"},
       {key:"status",label:"Situação"},
       {key:"unidade",label:"Unidade",nestedKey:"nome"},
     ],
@@ -4619,7 +5335,9 @@ export default function App({forceLogin=false}){
                 local_id:formData.local_id||null,
                 setor_id:formData.setor_id||null,
                 data_inicio:formData.data_inicio||null,
-                data_fim:formData.data_fim||null
+                data_fim:formData.data_fim||null,
+                agencia:formData.vinculo_agencia||null,
+                conta:formData.vinculo_conta||null
               };
               if(isInternato){
                 vincData.internato_id=formData.internato_id||null;
@@ -4688,7 +5406,9 @@ export default function App({forceLogin=false}){
               local_id:saveData.local_id||null,
               setor_id:saveData.setor_id||null,
               data_inicio:saveData.data_inicio||null,
-              data_fim:saveData.data_fim||null
+              data_fim:saveData.data_fim||null,
+              agencia:saveData.vinculo_agencia||null,
+              conta:saveData.vinculo_conta||null
             };
             if(isInternato){
               vincData.internato_id=saveData.internato_id||null;
@@ -5057,6 +5777,7 @@ export default function App({forceLogin=false}){
             <button title="Editar preceptor" aria-label="Editar preceptor" onClick={()=>setModal({mode:"form",title:`Editar: ${r.nome_completo}`,page,editId:r.id,editData:r})}><Pencil/></button>
             {!preceptorInativo&&<button title="Desativar preceptor" aria-label="Desativar preceptor" onClick={()=>handleInativarPreceptor(r)} style={{color:'var(--danger)'}}><ShieldOff/></button>}
             {preceptorInativo&&<button title="Reativar preceptor" aria-label="Reativar preceptor" onClick={()=>handleReativarPreceptor(r)} style={{color:'var(--success)'}}><Shield/></button>}
+            {isAdmin&&<button title="Excluir preceptor" aria-label="Excluir preceptor" onClick={()=>handleAbrirExcluirPreceptor(r.id)} style={{color:'var(--danger)'}}><Trash2/></button>}
           </>:<>
             <button title="Consultar preceptor" aria-label="Consultar preceptor" onClick={()=>setModal({mode:"detail",title:r.nome_completo,row:r,page})}><Eye/></button>
             {!vCompleto&&!isInactive&&<button title="Completar cadastro" aria-label="Completar cadastro" onClick={()=>setModal({mode:"form",title:`Completar cadastro — ${r.nome_completo}`,page,editId:r.id,editData:r})}><AlertCircle/></button>}
@@ -5129,6 +5850,11 @@ export default function App({forceLogin=false}){
   const[excluirPreceptorCarregando,setExcluirPreceptorCarregando]=useState(false);
   const[excluirPreceptorExecutando,setExcluirPreceptorExecutando]=useState(false);
   const[excluirPreceptorTexto,setExcluirPreceptorTexto]=useState("");
+  const[excluirRegraModal,setExcluirRegraModal]=useState(null);
+  const[excluirRegraPrevia,setExcluirRegraPrevia]=useState(null);
+  const[excluirRegraCarregando,setExcluirRegraCarregando]=useState(false);
+  const[excluirRegraExecutando,setExcluirRegraExecutando]=useState(false);
+  const[excluirRegraTexto,setExcluirRegraTexto]=useState("");
   const[gruposExpandidos,setGruposExpandidos]=useState({});
 
   // Filtros avançados para Apuração Mensal
@@ -5717,14 +6443,14 @@ export default function App({forceLogin=false}){
         <td>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <div>
-              <em className={r.tipo_atuacao === 'adm' ? 'ok' : 'neutral'}>
-                {r.tipo_atuacao === 'adm' ? 'Prática' : 'Internato'}
+              <em className="neutral">
+                Internato
               </em>
               {r.unidade?.nome && <span className="ficha-tag" style={{ marginLeft: 6 }}>{r.unidade.nome}</span>}
             </div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
               {[
-                r.tipo_atuacao === 'internato' ? r.internato?.nome : null,
+                r.internato?.nome,
                 r.disciplina?.nome,
                 r.local?.nome,
                 r.setor?.nome
@@ -5754,26 +6480,20 @@ export default function App({forceLogin=false}){
         </td>
         <td>
           <span className="actions">
-            <button title="Visualizar regra" onClick={() => setModal({ mode: 'regra-detail', title: r.nome, row: r })}>
+            <button title="Visualizar regra" aria-label="Visualizar regra" onClick={() => setModal({ mode: 'regra-detail', title: r.nome, row: r })}>
               <Eye size={16} />
             </button>
-            <button title="Editar regra" onClick={() => setModal({ mode: 'regra-edit', title: `Editar: ${r.nome}`, row: r })}>
+            <button title="Editar regra" aria-label="Editar regra" onClick={() => setModal({ mode: 'regra-edit', title: `Editar: ${r.nome}`, row: r })}>
               <Pencil size={16} />
             </button>
-            {isAtivo ? (
-              <button title="Inativar regra" onClick={async () => {
-                if (!await systemConfirm(`Inativar a regra "${r.nome}"?`,`Inativar regra financeira`)) return;
-                try { await inativarRegraFinanceira(r.id); notify('Regra inativada com sucesso!'); loadPage(); }
-                catch (e) { notify('Erro: ' + e.message, 'error'); }
-              }}>
-                <LogOut size={16} />
-              </button>
-            ) : (
-              <button title="Reativar regra" onClick={async () => {
-                try { await reativarRegraFinanceira(r); notify('Regra reativada com sucesso!'); loadPage(); }
-                catch (e) { notify(e.message, 'error'); }
-              }}>
-                <LogIn size={16} />
+            {isAdmin && (
+              <button
+                title="Excluir regra"
+                aria-label="Excluir regra"
+                onClick={() => handleAbrirExcluirRegra(r)}
+                style={{ color: 'var(--danger)' }}
+              >
+                <Trash2 size={16} />
               </button>
             )}
           </span>
@@ -5831,11 +6551,7 @@ export default function App({forceLogin=false}){
             try{await inativarReativarUsuario(r.profile_id,false);notify("Usuario reativado com sucesso!");loadPage();}
             catch(e){notify("Erro: "+e.message,"error");}
           }} title="Reativar"><RotateCw size={16}/></button>}
-          {!isSelf&&<button onClick={async()=>{
-            if(!await systemConfirm(`Redefinir acesso de ${r.nome_completo}?\nO usuario precisara criar uma nova senha no proximo login.`,"Redefinir acesso",{danger:true}))return;
-            try{await redefinirAcessoViaEdge(r.profile_id);notify("Acesso redefinido! Senha temporaria: ser@2026");loadPage();}
-            catch(e){notify("Erro: "+e.message,"error");}
-          }} title="Redefinir acesso"><RotateCw size={16}/></button>}
+          {!isSelf&&<button onClick={()=>abrirModalRestaurar(r,null)} title="Restaurar acesso e gerar código temporário"><KeyRound size={16}/></button>}
         </span></td>
       </tr>;
     })}</tbody>;
@@ -6455,10 +7171,12 @@ export default function App({forceLogin=false}){
       const previa=await previaExcluirPreceptor(preceptorId);
       setExcluirPreceptorPrevia(previa);
     }catch(e){
-      notify(e.message||"Erro ao buscar prévia.","error");
+      console.error("Erro ao buscar prévia de exclusão do preceptor:", e);
+      notify("Erro ao carregar prévia do preceptor.","error");
       setExcluirPreceptorModal(null);
+    }finally{
+      setExcluirPreceptorCarregando(false);
     }
-    setExcluirPreceptorCarregando(false);
   }
 
   function fecharExcluirPreceptor(){
@@ -6483,9 +7201,65 @@ export default function App({forceLogin=false}){
       notify("Preceptor excluído permanentemente.");
       loadPage();
     }catch(e){
-      notify(e.message||"Erro ao excluir preceptor.","error");
+      console.error("Erro técnico ao excluir preceptor permanentemente:", e);
+      notify("Não foi possível excluir o preceptor permanentemente. Tente novamente ou consulte o suporte.","error");
+    }finally{
+      setExcluirPreceptorExecutando(false);
     }
-    setExcluirPreceptorExecutando(false);
+  }
+
+  async function handleAbrirExcluirRegra(regra){
+    if(!isAdmin){
+      notify("Acesso negado. Somente Administradores podem excluir regras financeiras.","error");
+      return;
+    }
+    if(!regra?.id){
+      notify("Regra não encontrada.","error");
+      return;
+    }
+    setExcluirRegraModal(regra);
+    setExcluirRegraPrevia(null);
+    setExcluirRegraTexto("");
+    setExcluirRegraCarregando(true);
+    try{
+      const previa=await previaExcluirRegraFinanceira(regra.id);
+      setExcluirRegraPrevia(previa);
+    }catch(e){
+      console.error("Erro ao buscar prévia de exclusão da regra financeira:", e);
+      notify(mensagemErroAmigavel(e, "Erro ao carregar prévia da regra financeira."), "error");
+      setExcluirRegraModal(null);
+    }finally{
+      setExcluirRegraCarregando(false);
+    }
+  }
+
+  function fecharExcluirRegra(){
+    if(excluirRegraExecutando)return;
+    setExcluirRegraModal(null);
+    setExcluirRegraPrevia(null);
+    setExcluirRegraTexto("");
+  }
+
+  async function handleExecutarExcluirRegra(){
+    if(!excluirRegraModal||!excluirRegraPrevia)return;
+    if(excluirRegraTexto.trim()!=="EXCLUIR"){
+      notify("Digite EXCLUIR para confirmar a exclusão permanente.","error");
+      return;
+    }
+    setExcluirRegraExecutando(true);
+    try{
+      await excluirRegraFinanceira(excluirRegraModal.id,{confirmar:true});
+      const regraExcluidaId=excluirRegraModal.id;
+      fecharExcluirRegra();
+      notify("Regra financeira excluída permanentemente.");
+      setRows(prev=>prev.filter(r=>r.id!==regraExcluidaId));
+      loadPage();
+    }catch(e){
+      console.error("Erro técnico ao excluir regra financeira permanentemente:", e);
+      notify(mensagemErroAmigavel(e, "Não foi possível excluir a regra financeira permanentemente. Tente novamente ou consulte o suporte."), "error");
+    }finally{
+      setExcluirRegraExecutando(false);
+    }
   }
 
   function renderApuracaoMensalTable(){
@@ -7194,9 +7968,10 @@ export default function App({forceLogin=false}){
           page==="registrar-presencas"?<RegistrarPresencasPage userId={session?.user?.id}/>:
           page==="controle-financeiro"?renderApuracaoMensalTable():
           page==="apuracao-mensal"?renderApuracaoMensalTable():
+           page==="acompanhamento-financeiro"?<AcompanhamentoFinanceiroPage onAbrirControle={abrirControleFiltrado}/>:
            page==="dashboard"?<DashboardPage onAbrirControle={abrirControleFiltrado}/>:
         <div className={"panel"+(page==="regras"?" rules-panel":"")}>
-          {page==="regras"&&<div className="rules-overview"><div><small>REGRAS CADASTRADAS</small><strong>{rows.length}</strong></div><div><small>ATIVAS</small><strong>{rows.filter(r=>r.status==="ativo").length}</strong></div><div><small>PRÁTICA</small><strong>{rows.filter(r=>r.tipo_atuacao==="adm").length}</strong></div><div><small>INTERNATO</small><strong>{rows.filter(r=>r.tipo_atuacao==="internato").length}</strong></div></div>}
+          {page==="regras"&&<div className="rules-overview"><div><small>REGRAS CADASTRADAS</small><strong>{rows.length}</strong></div><div><small>ATIVAS</small><strong>{rows.filter(r=>r.status==="ativo").length}</strong></div><div><small>INTERNATO</small><strong>{rows.filter(r=>r.tipo_atuacao==="internato").length}</strong></div></div>}
           {pageFilterConfigs[page]?<SearchFilterBar
             search={search} setSearch={setSearch}
             placeholder={page==="escalas"?"Buscar por preceptor, Internato, local ou setor":page==="presencas"?"Buscar por preceptor, competência ou local":page==="usuarios"?"Buscar por nome, email...":page==="regras"?"Buscar por nome, unidade, disciplina...":page==="auditoria"?"Buscar por tabela, operação...":`Buscar por nome, CPF, profissão, unidade...`}
@@ -7239,7 +8014,158 @@ export default function App({forceLogin=false}){
               {renderTable()}
             </table>
           </div>
-          {!filteredRows.length&&<div className="empty"><FileSearch/><b>Nenhum registro encontrado</b>{search.trim()&&<span> para "{search.trim()}"</span>}{Object.values(panelFilters).flat().length>0&&<small> Tente ajustar os filtros aplicados.</small>}</div>}</>
+          {!filteredRows.length&&<div className="empty"><FileSearch/><b>Nenhum registro encontrado</b>{search.trim()&&<span> para "{search.trim()}"</span>}{Object.values(panelFilters).flat().length>0&&<small> Tente ajustar os filtros aplicados.</small>}</div>}
+          {page==="usuarios"&&isAdmin&&(
+            <div className="recuperacoes-acesso-section" style={{marginTop:36,borderTop:"1px solid var(--border)",paddingTop:24}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:12}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <KeyRound size={20} style={{color:"var(--navy-800)"}}/>
+                  <h3 style={{margin:0,fontSize:16,fontWeight:700,color:"var(--navy-800)"}}>Recuperações de acesso</h3>
+                  {solicitacoesRecup.filter(s=>s.situacao!=="concluida"&&(s.primeiro_acesso_pendente||s.situacao==="pendente")).length>0?(
+                    <span className="user-role-badge" style={{background:solicitacoesRecup.some(s=>s.situacao==="pendente")?"#fef3c7":"#eff6ff",color:solicitacoesRecup.some(s=>s.situacao==="pendente")?"#92400e":"#1e40af",fontWeight:700,padding:"2px 8px",borderRadius:12}}>
+                      {solicitacoesRecup.filter(s=>s.situacao==="pendente").length>0
+                        ? `${solicitacoesRecup.filter(s=>s.situacao==="pendente").length} pendente(s)`
+                        : `${solicitacoesRecup.filter(s=>s.situacao!=="concluida"&&(s.primeiro_acesso_pendente||s.situacao==="aguardando_troca")).length} aguardando troca`}
+                    </span>
+                  ):(
+                    <span className="user-role-badge" style={{background:"#ecfdf5",color:"#065f46",fontSize:11,padding:"2px 8px",borderRadius:12}}>
+                      Nenhuma pendência ativa
+                    </span>
+                  )}
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={abrirModalConfigResponsavel}
+                    style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:13,padding:"6px 14px",borderRadius:6,cursor:"pointer",border:"1px solid var(--border)",background:"#fff"}}
+                  >
+                    <Settings size={14}/> Configurar responsável
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={carregarSolicitacoesRecuperacao}
+                    disabled={solicitacoesRecupLoading}
+                    title="Atualizar lista de solicitações"
+                    style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:13,padding:"6px 12px",borderRadius:6,cursor:"pointer",border:"1px solid var(--border)",background:"#fff"}}
+                  >
+                    <RotateCw size={14} className={solicitacoesRecupLoading?"spin":""}/>
+                  </button>
+                </div>
+              </div>
+
+              {solicitacoesRecupLoading?(
+                <div className="empty" style={{padding:24}}><Loader2 size={20} className="spin"/><b>Carregando solicitações...</b></div>
+              ):solicitacoesRecup.filter(s=>s.situacao!=="concluida"&&(s.primeiro_acesso_pendente||s.situacao==="pendente")).length===0?(
+                <div className="empty" style={{padding:24,background:"#f8fafc",borderRadius:8,border:"1px dashed var(--border)"}}>
+                  <CheckCircle size={20} style={{color:"#10b981"}}/>
+                  <b>Nenhuma solicitação ou código ativo pendente</b>
+                  <small style={{color:"var(--text-muted)"}}>Quando um usuário solicitar recuperação ou tiver o código de primeiro acesso gerado, aparecerá aqui até que a senha seja trocada.</small>
+                </div>
+              ):(
+                <div className="tablewrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Usuário</th>
+                        <th>E-mail</th>
+                        <th>Perfil</th>
+                        <th>Unidade(s)</th>
+                        <th>Solicitado em</th>
+                        <th>Tentativas</th>
+                        <th>Situação</th>
+                        <th>Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {solicitacoesRecup.filter(s=>s.situacao!=="concluida"&&(s.primeiro_acesso_pendente||s.situacao==="pendente")).map(s=>{
+                        const pendente=s.situacao==="pendente";
+                        const aguardandoTroca=s.situacao==="aguardando_troca"||(s.codigo_temporario&&s.primeiro_acesso_pendente);
+                        return(
+                          <tr key={s.id}>
+                            <td><strong>{s.nome_usuario||s.usuario_nome||s.email}</strong></td>
+                            <td>{s.email}</td>
+                            <td><span className="user-role-badge">{ROLE_LABELS[s.perfil]||s.perfil||s.perfil_nome||"-"}</span></td>
+                            <td><small>{Array.isArray(s.unidades)&&s.unidades.length>0?s.unidades.join(", "):(s.unidades_nomes||"Todas / Geral")}</small></td>
+                            <td>{fmtTimestamp(s.solicitada_em||s.solicitado_em)}</td>
+                            <td>{s.tentativas||1}</td>
+                            <td>
+                              <em className={pendente?"warn":aguardandoTroca?"info":"ok"}>
+                                {pendente?"Pendente":aguardandoTroca?"Aguardando troca de senha":"Concluída"}
+                              </em>
+                              {s.resolvida_em&&(
+                                <div style={{fontSize:10,color:"var(--text-muted)",marginTop:2}}>
+                                  Código gerado {fmtTimestamp(s.resolvida_em)}{s.resolvida_por_nome?` por ${s.resolvida_por_nome}`:""}
+                                </div>
+                              )}
+                            </td>
+                            <td>
+                              <span className="actions">
+                                {pendente?(
+                                  <button
+                                    onClick={()=>abrirModalRestaurar({
+                                      profile_id:s.profile_id||s.usuario_id,
+                                      nome_completo:s.nome_usuario||s.usuario_nome||s.email,
+                                      email:s.email,
+                                      perfil_nome:ROLE_LABELS[s.perfil]||s.perfil||s.perfil_nome,
+                                      unidades:Array.isArray(s.unidades)&&s.unidades.length>0?s.unidades.join(", "):(s.unidades_nomes||"Todas / Geral")
+                                    },s.id,null)}
+                                    title="Restaurar senha e gerar código de acesso"
+                                    style={{
+                                      display:"inline-flex",
+                                      alignItems:"center",
+                                      gap:6,
+                                      padding:"4px 10px",
+                                      borderRadius:6,
+                                      fontSize:12,
+                                      fontWeight:600,
+                                      background:"var(--navy-800)",
+                                      color:"#fff",
+                                      border:"none",
+                                      cursor:"pointer"
+                                    }}
+                                  >
+                                    <KeyRound size={13}/> Restaurar senha
+                                  </button>
+                                ):(
+                                  <button
+                                    onClick={()=>abrirModalRestaurar({
+                                      profile_id:s.profile_id||s.usuario_id,
+                                      nome_completo:s.nome_usuario||s.usuario_nome||s.email,
+                                      email:s.email,
+                                      perfil_nome:ROLE_LABELS[s.perfil]||s.perfil||s.perfil_nome,
+                                      unidades:Array.isArray(s.unidades)&&s.unidades.length>0?s.unidades.join(", "):(s.unidades_nomes||"Todas / Geral")
+                                    },s.id,s.codigo_temporario)}
+                                    title="Ver código temporário de primeiro acesso"
+                                    style={{
+                                      display:"inline-flex",
+                                      alignItems:"center",
+                                      gap:6,
+                                      padding:"4px 10px",
+                                      borderRadius:6,
+                                      fontSize:12,
+                                      fontWeight:600,
+                                      background:"#eff6ff",
+                                      color:"#1e40af",
+                                      border:"1px solid #bfdbfe",
+                                      cursor:"pointer"
+                                    }}
+                                  >
+                                    <Eye size={13}/> Ver código
+                                  </button>
+                                )}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}</>
           }
         </div>}
       </div>
@@ -7544,6 +8470,257 @@ export default function App({forceLogin=false}){
       </div>
     </div>}
 
+    {modalRestaurarAcesso && (
+      <div className="overlay modal">
+        <div className="dialog" style={{ maxWidth: 540 }}>
+          <div className="modalhead">
+            <div>
+              <small>RECUPERAÇÃO ADMINISTRATIVA</small>
+              <h2>{modalRestaurarAcesso.step === 'done' ? "Código de primeiro acesso" : "Restaurar acesso do usuário"}</h2>
+            </div>
+            <button onClick={() => setModalRestaurarAcesso(null)} aria-label="Fechar"><X /></button>
+          </div>
+          <div className="form" style={{ padding: 20 }}>
+            {/* Dados do usuário sempre visíveis */}
+            <div style={{ background: "#f8fafc", padding: 14, borderRadius: 8, border: "1px solid var(--border)", marginBottom: 16 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, fontSize: 13 }}>
+                <div>
+                  <small style={{ color: "var(--text-muted)", display: "block" }}>Nome do usuário</small>
+                  <strong>{modalRestaurarAcesso.user?.nome_completo || "-"}</strong>
+                </div>
+                <div>
+                  <small style={{ color: "var(--text-muted)", display: "block" }}>E-mail</small>
+                  <strong>{modalRestaurarAcesso.user?.email || "-"}</strong>
+                </div>
+                <div>
+                  <small style={{ color: "var(--text-muted)", display: "block" }}>Perfil</small>
+                  <span>{modalRestaurarAcesso.user?.perfil_nome || (Array.isArray(modalRestaurarAcesso.user?.roles) ? modalRestaurarAcesso.user.roles.map(r=>ROLE_LABELS[r]||r).join(", ") : "-")}</span>
+                </div>
+                <div>
+                  <small style={{ color: "var(--text-muted)", display: "block" }}>Unidade(s)</small>
+                  <span>{modalRestaurarAcesso.user?.unidades || modalRestaurarAcesso.user?.unidade || "Todas / Geral"}</span>
+                </div>
+              </div>
+            </div>
+
+            {modalRestaurarAcesso.step === 'confirm' ? (
+              <>
+                <div style={{ background: "#fffbeb", border: "1px solid #fde68a", padding: 12, borderRadius: 8, marginBottom: 16, fontSize: 13, color: "#92400e", display: "flex", gap: 10, alignItems: "flex-start" }}>
+                  <AlertCircle size={18} style={{ flexShrink: 0, marginTop: 2 }} />
+                  <div>
+                    <strong>Atenção:</strong> Um novo código de acesso temporário será gerado criptograficamente. O status do usuário será marcado como <em>Primeiro acesso pendente</em>, exigindo o cadastro de uma nova senha pessoal no próximo login.
+                  </div>
+                </div>
+
+                <footer style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 12 }}>
+                  <button type="button" className="btn-secondary" onClick={() => setModalRestaurarAcesso(null)} disabled={restaurandoExecutando} style={{ padding: "8px 16px", borderRadius: 6, border: "1px solid var(--border)", background: "#fff", cursor: "pointer" }}>
+                    Cancelar
+                  </button>
+                  <button type="button" className="btn" onClick={executarRestauracaoAcesso} disabled={restaurandoExecutando} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 6, background: "var(--navy-800)", color: "#fff", fontWeight: 600, border: "none", cursor: "pointer" }}>
+                    {restaurandoExecutando ? <Loader2 size={16} className="spin" /> : <KeyRound size={16} />}
+                    {restaurandoExecutando ? "Gerando código..." : "Gerar novo código de acesso"}
+                  </button>
+                </footer>
+              </>
+            ) : (
+              <>
+                <div style={{ textAlign: "center", padding: "6px 0 16px" }}>
+                  <div style={{ width: 44, height: 44, borderRadius: "50%", background: "#ecfdf5", color: "#10b981", display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 10 }}>
+                    <KeyRound size={24} />
+                  </div>
+                  <h3 style={{ margin: "0 0 4px", fontSize: 16, color: "var(--navy-800)" }}>Código temporário ativo</h3>
+                  <p style={{ margin: 0, fontSize: 13, color: "var(--text-muted)" }}>
+                    Encaminhe o código abaixo ao usuário para realizar o primeiro acesso ao sistema.
+                  </p>
+                </div>
+
+                <div style={{ background: "#f8fafc", border: "2px dashed var(--gold-500, #d97706)", borderRadius: 8, padding: 16, textAlign: "center", marginBottom: 16 }}>
+                  <small style={{ color: "var(--text-muted)", display: "block", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 11, fontWeight: 700 }}>
+                    Código Temporário de Acesso
+                  </small>
+                  <div style={{ fontFamily: "monospace", fontSize: 22, fontWeight: 700, letterSpacing: "0.15em", color: "var(--navy-800)", background: "#fff", padding: "10px 16px", borderRadius: 6, border: "1px solid var(--border)", display: "inline-block", userSelect: "all" }}>
+                    {modalRestaurarAcesso.novoCodigo}
+                  </div>
+                  <div style={{ marginTop: 12 }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (modalRestaurarAcesso.novoCodigo) {
+                          navigator.clipboard.writeText(modalRestaurarAcesso.novoCodigo);
+                          setModalRestaurarAcesso(prev => ({ ...prev, copiado: true }));
+                          setTimeout(() => setModalRestaurarAcesso(prev => prev ? ({ ...prev, copiado: false }) : null), 3000);
+                        }
+                      }}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        padding: "7px 16px",
+                        borderRadius: 6,
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        border: "1px solid var(--gold-500, #d97706)",
+                        background: modalRestaurarAcesso.copiado ? "#ecfdf5" : "#fff",
+                        color: modalRestaurarAcesso.copiado ? "#065f46" : "var(--gold-600, #b45309)"
+                      }}
+                    >
+                      {modalRestaurarAcesso.copiado ? <Check size={16} /> : <Copy size={16} />}
+                      {modalRestaurarAcesso.copiado ? "Código copiado!" : "Copiar código"}
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", padding: 12, borderRadius: 8, marginBottom: 16, fontSize: 12, color: "#1e40af" }}>
+                  <strong>Aviso:</strong> Este código permanece ativo e visível para consulta enquanto o usuário não concluir a troca de senha. Assim que a nova senha pessoal for definida no primeiro acesso, esta solicitação será concluída e sairá automaticamente do painel.
+                </div>
+
+                <footer style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12 }}>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={executarRestauracaoAcesso}
+                    disabled={restaurandoExecutando}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 6, border: "1px solid var(--border)", background: "#fff", fontSize: 13, cursor: "pointer" }}
+                  >
+                    {restaurandoExecutando ? <Loader2 size={14} className="spin" /> : <RotateCw size={14} />}
+                    {restaurandoExecutando ? "Gerando..." : "Gerar novo código"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => setModalRestaurarAcesso(null)}
+                    style={{ padding: "8px 22px", borderRadius: 6, background: "var(--navy-800)", color: "#fff", fontWeight: 600, border: "none", cursor: "pointer" }}
+                  >
+                    Fechar
+                  </button>
+                </footer>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {modalConfigResponsavel && (
+      <div className="overlay modal">
+        <div className="dialog" style={{ maxWidth: 540, maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
+          <div className="modalhead">
+            <div>
+              <small>RECUPERAÇÃO ADMINISTRATIVA</small>
+              <h2>Configurar responsáveis institucionais</h2>
+            </div>
+            <button onClick={() => setModalConfigResponsavel(false)} aria-label="Fechar"><X /></button>
+          </div>
+          <form onSubmit={handleSalvarConfigResponsavel} className="form" style={{ padding: 20, overflowY: "auto", flex: 1, display: "flex", flexDirection: "column" }}>
+            <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 16 }}>
+              Cadastre um ou mais responsáveis e e-mails institucionais. Eles serão exibidos no modal de login quando um usuário solicitar a recuperação de sua senha.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 16, marginBottom: 16 }}>
+              {dadosConfigResp.map((resp, idx) => (
+                <div key={idx} style={{ background: "#f8fafc", border: "1px solid var(--border)", borderRadius: 8, padding: 14 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "var(--navy-800)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                      Responsável {idx + 1}
+                    </span>
+                    {dadosConfigResp.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoverResponsavelConfig(idx)}
+                        title="Remover este responsável"
+                        style={{ border: "none", background: "none", color: "#dc2626", cursor: "pointer", padding: 4, display: "flex", alignItems: "center" }}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 600, color: "var(--navy-800)" }}>
+                      <span>Nome do responsável ou setor *</span>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Ex: Suporte de TI / Coordenação Geral"
+                        value={resp.nome_responsavel}
+                        onChange={e => handleAtualizarResponsavelConfig(idx, "nome_responsavel", e.target.value)}
+                        style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid var(--border)", fontSize: 13, background: "#fff" }}
+                      />
+                    </label>
+
+                    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 600, color: "var(--navy-800)" }}>
+                      <span>E-mail institucional de contato *</span>
+                      <input
+                        type="email"
+                        required
+                        placeholder="Ex: ti@instituicao.edu.br"
+                        value={resp.email_responsavel}
+                        onChange={e => handleAtualizarResponsavelConfig(idx, "email_responsavel", e.target.value)}
+                        style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid var(--border)", fontSize: 13, background: "#fff" }}
+                      />
+                    </label>
+
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--navy-800)", cursor: "pointer", marginTop: 2 }}>
+                      <input
+                        type="checkbox"
+                        checked={resp.ativo}
+                        onChange={e => handleAtualizarResponsavelConfig(idx, "ativo", e.target.checked)}
+                      />
+                      <span>Exibir este contato no modal "Esqueci minha senha"</span>
+                    </label>
+                  </div>
+                </div>
+              ))}
+
+              <div>
+                <button
+                  type="button"
+                  onClick={handleAdicionarResponsavelConfig}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "8px 14px",
+                    borderRadius: 6,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    background: "#fff",
+                    border: "1px dashed var(--navy-800)",
+                    color: "var(--navy-800)",
+                    cursor: "pointer",
+                    width: "100%",
+                    justifyContent: "center"
+                  }}
+                >
+                  <Plus size={15} /> Adicionar outro responsável
+                </button>
+              </div>
+            </div>
+
+            <footer style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: "auto", paddingTop: 14, borderTop: "1px solid var(--border)" }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setModalConfigResponsavel(false)}
+                disabled={salvandoConfigResp}
+                style={{ padding: "8px 16px", borderRadius: 6, border: "1px solid var(--border)", background: "#fff", cursor: "pointer" }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                className="btn"
+                disabled={salvandoConfigResp}
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 6, background: "var(--navy-800)", color: "#fff", fontWeight: 600, border: "none", cursor: "pointer" }}
+              >
+                {salvandoConfigResp ? <Loader2 size={16} className="spin" /> : <Check size={16} />}
+                {salvandoConfigResp ? "Salvando..." : "Salvar configuração"}
+              </button>
+            </footer>
+          </form>
+        </div>
+      </div>
+    )}
+
     {refazerFluxoModal&&<div className="system-dialog-overlay" onMouseDown={e=>{if(e.target===e.currentTarget&&!refazerFluxoExecutando){setRefazerFluxoModal(null);setRefazerFluxoPrevia(null);setRefazerFluxoEscopo("")}}}>
       <section className="system-dialog refazer-fluxo-dialog" role="dialog" aria-modal="true">
         <header>
@@ -7816,42 +8993,48 @@ export default function App({forceLogin=false}){
               </div>
             </div>}
 
-            {!excluirPreceptorPrevia.bloqueado&&<>
-              {excluirPreceptorPrevia.resumo&&<div className="refazer-fluxo-resumo">
-                <div className="refazer-fluxo-resumo-title"><Calculator size={15}/><b>O que será excluído permanentemente:</b></div>
-                <div className="refazer-fluxo-resumo-grid">
-                  <div className="refazer-fluxo-resumo-item"><span>Vínculos</span><strong>{excluirPreceptorPrevia.resumo.total_vinculos||0}</strong></div>
-                  <div className="refazer-fluxo-resumo-item"><span>Coordenadores associados</span><strong>{excluirPreceptorPrevia.resumo.total_coordenadores||0}</strong></div>
-                  <div className="refazer-fluxo-resumo-item"><span>Escalas</span><strong>{excluirPreceptorPrevia.resumo.total_escalas||0}</strong></div>
-                  <div className="refazer-fluxo-resumo-item"><span>Itens de escala</span><strong>{excluirPreceptorPrevia.resumo.total_escalas_itens||0}</strong></div>
-                  <div className="refazer-fluxo-resumo-item"><span>Presenças</span><strong>{excluirPreceptorPrevia.resumo.total_presencas||0}</strong></div>
-                  <div className="refazer-fluxo-resumo-item"><span>Cálculos</span><strong>{excluirPreceptorPrevia.resumo.total_calculos||0}</strong></div>
-                  <div className="refazer-fluxo-resumo-item"><span>Itens de cálculo</span><strong>{excluirPreceptorPrevia.resumo.total_calculo_itens||0}</strong></div>
-                  <div className="refazer-fluxo-resumo-item"><span>Revisões financeiras</span><strong>{excluirPreceptorPrevia.resumo.total_aprovacoes||0}</strong></div>
-                  <div className="refazer-fluxo-resumo-item"><span>Solicitações fiscais</span><strong>{excluirPreceptorPrevia.resumo.total_solicitacoes||0}</strong></div>
-                  <div className="refazer-fluxo-resumo-item"><span>Itens de solicitação NF</span><strong>{excluirPreceptorPrevia.resumo.total_solicitacoes_itens||0}</strong></div>
-                  <div className="refazer-fluxo-resumo-item"><span>Eventos fiscais</span><strong>{excluirPreceptorPrevia.resumo.total_solicitacoes_eventos||0}</strong></div>
-                  <div className="refazer-fluxo-resumo-item"><span>Pagamentos</span><strong>{excluirPreceptorPrevia.resumo.total_pagamentos||0}</strong></div>
-                  <div className="refazer-fluxo-resumo-item"><span>Itens de pagamento</span><strong>{excluirPreceptorPrevia.resumo.total_processo_calculos||0}</strong></div>
-                  <div className="refazer-fluxo-resumo-item"><span>Movimentos de saldo</span><strong>{excluirPreceptorPrevia.resumo.total_saldo_movimentos||0}</strong></div>
-                  <div className="refazer-fluxo-resumo-item"><span>Arquivos e registros dependentes</span><strong>{excluirPreceptorPrevia.resumo.total_arquivos_registros||0}</strong></div>
-                </div>
-              </div>}
+            {!excluirPreceptorPrevia.bloqueado&&(()=>{
+              const r=excluirPreceptorPrevia.resumo||{};
+              const qtdDemais=(r.total_coordenadores||0)+(r.total_escalas_itens||0)+(r.total_calculo_itens||0)+(r.total_aprovacoes||0)+(r.total_solicitacoes||0)+(r.total_solicitacoes_itens||0)+(r.total_solicitacoes_eventos||0)+(r.total_processo_calculos||0)+(r.total_pagamento_itens||0)+(r.total_saldo_movimentos||0)+(r.total_documentos||0)+(r.total_favorecidos||0)+(r.total_acesso_presenca||0)+(r.total_rateios||0)+(r.total_regra_preceptores||0)+(r.total_vinculo_locais||0)+(r.total_vinculo_regras||0);
+              return <>
+                {excluirPreceptorPrevia.pagamento_concluido&&<div className="finance-alert" style={{marginBottom:12}}>
+                  <div className="finance-alert-header">
+                    <AlertCircle size={18}/>
+                    <div>
+                      <strong>Fluxo com pagamento concluído</strong>
+                      <small>Este preceptor possui registros com pagamento concluído. A exclusão removerá todo o histórico desse preceptor, inclusive os pagamentos associados.</small>
+                    </div>
+                  </div>
+                </div>}
 
-              <div className="finance-alert" style={{marginTop:16}}>
-                <div className="finance-alert-header">
-                  <AlertCircle size={18}/>
-                  <div>
-                    <strong>Esta ação excluirá permanentemente o preceptor, todos os vínculos e todos os dados dependentes. A ação não poderá ser desfeita.</strong>
+                {excluirPreceptorPrevia.resumo&&<div className="refazer-fluxo-resumo">
+                  <div className="refazer-fluxo-resumo-title"><Calculator size={15}/><b>O que será excluído permanentemente:</b></div>
+                  <div className="refazer-fluxo-resumo-grid">
+                    <div className="refazer-fluxo-resumo-item"><span>Vínculos</span><strong>{r.total_vinculos||0}</strong></div>
+                    <div className="refazer-fluxo-resumo-item"><span>Escalas</span><strong>{r.total_escalas||0}</strong></div>
+                    <div className="refazer-fluxo-resumo-item"><span>Presenças</span><strong>{r.total_presencas||0}</strong></div>
+                    <div className="refazer-fluxo-resumo-item"><span>Cálculos</span><strong>{r.total_calculos||0}</strong></div>
+                    <div className="refazer-fluxo-resumo-item"><span>Pagamentos</span><strong>{r.total_pagamentos||0}</strong></div>
+                    <div className="refazer-fluxo-resumo-item"><span>E-mails adicionais</span><strong>{r.total_emails_copia||0}</strong></div>
+                    <div className="refazer-fluxo-resumo-item"><span>Demais dependências</span><strong>{qtdDemais}</strong></div>
+                  </div>
+                </div>}
+
+                <div className="finance-alert" style={{marginTop:16}}>
+                  <div className="finance-alert-header">
+                    <AlertCircle size={18}/>
+                    <div>
+                      <strong>Esta ação excluirá permanentemente o preceptor, todos os vínculos e todos os dados dependentes. A ação não poderá ser desfeita.</strong>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <label style={{display:"flex",flexDirection:"column",gap:4,fontSize:12,fontWeight:600,color:"var(--navy-800)",marginTop:16}}>
-                <span>Digite <b>EXCLUIR</b> para confirmar</span>
-                <input type="text" value={excluirPreceptorTexto} onChange={e=>setExcluirPreceptorTexto(e.target.value)} placeholder="EXCLUIR" autoComplete="off" style={{padding:"8px 12px",borderRadius:8,border:"1px solid var(--border)"}}/>
-              </label>
-            </>}
+                <label style={{display:"flex",flexDirection:"column",gap:4,fontSize:12,fontWeight:600,color:"var(--navy-800)",marginTop:16}}>
+                  <span>Digite <b>EXCLUIR</b> para confirmar</span>
+                  <input type="text" value={excluirPreceptorTexto} onChange={e=>setExcluirPreceptorTexto(e.target.value)} placeholder="EXCLUIR" autoComplete="off" style={{padding:"8px 12px",borderRadius:8,border:"1px solid var(--border)"}}/>
+                </label>
+              </>;
+            })()}
           </>}
         </div>
         <footer className="calculo-modal-footer" style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
@@ -7862,6 +9045,110 @@ export default function App({forceLogin=false}){
         </footer>
       </section>
     </div>}
+
+    {/* ============ MODAL: EXCLUIR REGRA FINANCEIRA PERMANENTEMENTE ============ */}
+    {excluirRegraModal && (
+      <div className="system-dialog-overlay" onMouseDown={e => { if (e.target === e.currentTarget && !excluirRegraExecutando) { fecharExcluirRegra(); } }}>
+        <section className="system-dialog refazer-fluxo-dialog" role="dialog" aria-modal="true">
+          <header>
+            <div className="system-dialog-icon" style={{ color: "var(--danger)", background: "#fef2f2" }}>
+              <Trash2 />
+            </div>
+            <div>
+              <small>REGRAS FINANCEIRAS</small>
+              <h3>Excluir regra permanentemente</h3>
+            </div>
+            <button onClick={fecharExcluirRegra} disabled={excluirRegraExecutando} aria-label="Fechar">
+              <X />
+            </button>
+          </header>
+          <div className="system-dialog-body" style={{ overflowY: "auto", maxHeight: "70vh" }}>
+            <div className="finance-alert" style={{ marginBottom: 16 }}>
+              <div className="finance-alert-header">
+                <AlertCircle size={18} />
+                <div>
+                  <strong>Esta ação excluirá permanentemente a regra financeira.</strong>
+                  <small>A regra deixará de estar disponível para novos vínculos e cálculos.</small>
+                </div>
+              </div>
+            </div>
+
+            {excluirRegraCarregando ? (
+              <div style={{ textAlign: "center", padding: 32 }}>
+                <Loader2 size={28} className="spin" />
+                <p style={{ marginTop: 12, color: "var(--text-muted)" }}>Carregando prévia da regra...</p>
+              </div>
+            ) : excluirRegraPrevia && (
+              <>
+                <div className="refazer-fluxo-info">
+                  <div className="refazer-fluxo-row">
+                    <b>Nome da regra</b>
+                    <span>{excluirRegraPrevia.nome || "-"}</span>
+                  </div>
+                  <div className="refazer-fluxo-row">
+                    <b>Modalidade</b>
+                    <span>{excluirRegraPrevia.tipo_atuacao || "Internato"}</span>
+                  </div>
+                  <div className="refazer-fluxo-row">
+                    <b>Vigência</b>
+                    <span>{excluirRegraPrevia.vigencia || "-"}</span>
+                  </div>
+                </div>
+
+                <div className="refazer-fluxo-resumo" style={{ marginTop: 12 }}>
+                  <div className="refazer-fluxo-resumo-title">
+                    <Calculator size={15} />
+                    <b>Impacto e dependências:</b>
+                  </div>
+                  <div className="refazer-fluxo-resumo-grid">
+                    <div className="refazer-fluxo-resumo-item">
+                      <span>Vínculos associados</span>
+                      <strong>{excluirRegraPrevia.total_vinculos || 0}</strong>
+                    </div>
+                    <div className="refazer-fluxo-resumo-item">
+                      <span>Cálculos históricos relacionados</span>
+                      <strong>{excluirRegraPrevia.total_calculos || 0}</strong>
+                    </div>
+                  </div>
+                </div>
+
+                <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 600, color: "var(--navy-800)", marginTop: 16 }}>
+                  <span>Digite <b>EXCLUIR</b> para confirmar</span>
+                  <input
+                    type="text"
+                    value={excluirRegraTexto}
+                    onChange={e => setExcluirRegraTexto(e.target.value)}
+                    placeholder="EXCLUIR"
+                    autoComplete="off"
+                    style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)" }}
+                  />
+                </label>
+              </>
+            )}
+          </div>
+          <footer className="calculo-modal-footer" style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button className="btn secondary" onClick={fecharExcluirRegra} disabled={excluirRegraExecutando}>
+              Cancelar
+            </button>
+            <button
+              className="btn danger"
+              onClick={handleExecutarExcluirRegra}
+              disabled={excluirRegraExecutando || excluirRegraCarregando || !excluirRegraPrevia || excluirRegraTexto.trim() !== "EXCLUIR"}
+            >
+              {excluirRegraExecutando ? (
+                <>
+                  <Loader2 size={16} className="spin" /> Excluindo...
+                </>
+              ) : (
+                <>
+                  <Trash2 size={16} /> Excluir permanentemente
+                </>
+              )}
+            </button>
+          </footer>
+        </section>
+      </div>
+    )}
 
 
     {/* ============ MODAL: CONFIRMAR ENVIO ============ */}
@@ -8611,8 +9898,48 @@ function RegraFinanceiraFormModal({ modal, options, optionsLoading, onClose, onS
   }
 
   const preceptorList = useMemo(() => {
-    return form.tipo_atuacao === "internato" ? (options.preceptoresInternato || []) : (options.preceptoresPratica || []);
-  }, [form.tipo_atuacao, options.preceptoresInternato, options.preceptoresPratica]);
+    return options.preceptoresInternato || [];
+  }, [options.preceptoresInternato]);
+
+  const [modalPreceptorAberto, setModalPreceptorAberto] = useState(false);
+  const [buscaPreceptor, setBuscaPreceptor] = useState("");
+  const [filtroUnidadePreceptor, setFiltroUnidadePreceptor] = useState("todas");
+
+  const selectedPreceptor = useMemo(() => {
+    return (preceptorList || []).find(p => p.id === form.preceptor_id) || null;
+  }, [preceptorList, form.preceptor_id]);
+
+  const unidadesUnicasPreceptores = useMemo(() => {
+    const set = new Set();
+    (preceptorList || []).forEach(p => {
+      if (p.unidades) {
+        p.unidades.split(',').forEach(u => {
+          const trimmed = u.trim();
+          if (trimmed) set.add(trimmed);
+        });
+      }
+    });
+    return Array.from(set).sort((a,b) => a.localeCompare(b, 'pt-BR'));
+  }, [preceptorList]);
+
+  const preceptoresFiltrados = useMemo(() => {
+    let lista = preceptorList || [];
+    if (filtroUnidadePreceptor !== "todas") {
+      lista = lista.filter(p => (p.unidades || '').includes(filtroUnidadePreceptor));
+    }
+    if (buscaPreceptor.trim()) {
+      const termo = buscaPreceptor.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      lista = lista.filter(p => {
+        const nome = (p.nome_completo || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+        const cpf = (p.cpf || '').replace(/\D/g, '');
+        const email = (p.email || '').toLowerCase();
+        const profissao = (p.profissao_nome || '').toLowerCase();
+        const unidades = (p.unidades || '').toLowerCase();
+        return nome.includes(termo) || cpf.includes(termo) || email.includes(termo) || profissao.includes(termo) || unidades.includes(termo);
+      });
+    }
+    return lista;
+  }, [preceptorList, buscaPreceptor, filtroUnidadePreceptor]);
 
   const isFormValid = useMemo(() => {
     if (!form.nome.trim() || !form.tipo_atuacao || !form.status || !componentes.length) return false;
@@ -8800,17 +10127,87 @@ function RegraFinanceiraFormModal({ modal, options, optionsLoading, onClose, onS
               </select>
             </div>
             <div className="regra-field">
-              <label>
-                Preceptor específico
+              <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span>Preceptor específico</span>
                 <span className="regra-badge">Exceção</span>
               </label>
-              <select value={form.preceptor_id} onChange={e => handleChange("preceptor_id", e.target.value)}>
-                <option value="">Todos os preceptores (regra geral)</option>
-                {preceptorList.length === 0 && <option disabled>(Nenhum cadastrado)</option>}
-                {preceptorList.map(p => <option key={p.id} value={p.id}>★ {p.nome_completo}</option>)}
-              </select>
-              <small style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 2 }}>
-                {form.tipo_atuacao === "internato" ? "Preceptores do Internato ativos" : "Preceptores Prática ativos"}
+
+              {selectedPreceptor ? (
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    style={{
+                      flex: 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '8px 12px',
+                      borderRadius: 8,
+                      border: '1px solid var(--gold-400)',
+                      background: '#fffdf5',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      minHeight: 40
+                    }}
+                    onClick={() => { setBuscaPreceptor(""); setModalPreceptorAberto(true); }}
+                    title="Clique para trocar o preceptor selecionado"
+                  >
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0, overflow: 'hidden' }}>
+                      <span style={{ color: 'var(--gold-600)', fontSize: 13, flexShrink: 0 }}>★</span>
+                      <b style={{ color: 'var(--navy-900)', fontSize: 13, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                        {selectedPreceptor.nome_completo}
+                      </b>
+                      {selectedPreceptor.cpf && (
+                        <small style={{ color: 'var(--text-muted)', fontSize: 11, flexShrink: 0 }}>
+                          ({formatCpf(selectedPreceptor.cpf)})
+                        </small>
+                      )}
+                    </span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gold-700)', textDecoration: 'underline', flexShrink: 0, marginLeft: 8 }}>
+                      Alterar
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    style={{ padding: '8px 10px', height: 40, borderColor: 'var(--border)' }}
+                    onClick={() => handleChange('preceptor_id', '')}
+                    title="Remover exceção (voltar para regra geral)"
+                    aria-label="Remover preceptor específico"
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '8px 12px',
+                    borderRadius: 8,
+                    border: '1px solid var(--border)',
+                    background: '#fff',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    minHeight: 40
+                  }}
+                  onClick={() => { setBuscaPreceptor(""); setModalPreceptorAberto(true); }}
+                >
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--navy-800)', fontSize: 13 }}>
+                    <Users size={15} style={{ color: 'var(--gold-600)' }} />
+                    <span>Todos os preceptores (regra geral)</span>
+                  </span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: 'var(--gold-700)' }}>
+                    <Search size={13} />
+                    <span>Selecionar</span>
+                  </span>
+                </button>
+              )}
+              <small style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 4, display: 'block' }}>
+                {selectedPreceptor ? "Regra individual aplicada exclusivamente a este preceptor." : "Clique para selecionar um preceptor específico como exceção."}
               </small>
             </div>
           </div>
@@ -8845,6 +10242,243 @@ function RegraFinanceiraFormModal({ modal, options, optionsLoading, onClose, onS
           {saving ? "Salvando…" : "Salvar regra"}
         </Btn>
       </div>
+
+      {/* Modal para seleção de preceptor específico com busca e filtros */}
+      {modalPreceptorAberto && (
+        <div
+          className="system-dialog-overlay"
+          style={{ zIndex: 99999 }}
+          onMouseDown={e => { if (e.target === e.currentTarget) setModalPreceptorAberto(false); }}
+        >
+          <section
+            className="system-dialog"
+            role="dialog"
+            aria-modal="true"
+            style={{ width: "min(680px, 96vw)", maxHeight: "90vh", display: "flex", flexDirection: "column" }}
+          >
+            <header style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px 20px" }}>
+              <div className="system-dialog-icon" style={{ background: "rgba(200,153,63,0.15)", color: "var(--gold-500)" }}>
+                <Users size={20} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <small style={{ color: "var(--gold-400)", fontWeight: 750, letterSpacing: "0.08em" }}>REGRAS FINANCEIRAS — EXCEÇÃO</small>
+                <h3 style={{ margin: "2px 0 0", color: "#fff", fontSize: 17 }}>Selecionar Preceptor Específico</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalPreceptorAberto(false)}
+                style={{ border: 0, background: "transparent", color: "#fff", cursor: "pointer", padding: 4 }}
+                aria-label="Fechar"
+              >
+                <X size={18} />
+              </button>
+            </header>
+
+            {/* Barra de busca e filtros */}
+            <div style={{ padding: "16px 20px 12px", borderBottom: "1px solid var(--border)", background: "var(--surface-soft)" }}>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                <div style={{ position: "relative", flex: 1, minWidth: 220 }}>
+                  <Search size={15} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
+                  <input
+                    type="text"
+                    value={buscaPreceptor}
+                    onChange={e => setBuscaPreceptor(e.target.value)}
+                    placeholder="Buscar por nome, CPF, e-mail ou unidade..."
+                    style={{
+                      width: "100%",
+                      padding: "8px 30px 8px 32px",
+                      borderRadius: 8,
+                      border: "1px solid var(--border)",
+                      fontSize: 13,
+                      background: "#fff"
+                    }}
+                    autoFocus
+                  />
+                  {buscaPreceptor && (
+                    <button
+                      type="button"
+                      onClick={() => setBuscaPreceptor("")}
+                      style={{
+                        position: "absolute",
+                        right: 8,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        border: 0,
+                        background: "transparent",
+                        cursor: "pointer",
+                        color: "var(--text-muted)"
+                      }}
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+
+                {unidadesUnicasPreceptores.length > 0 && (
+                  <div style={{ minWidth: 160 }}>
+                    <select
+                      value={filtroUnidadePreceptor}
+                      onChange={e => setFiltroUnidadePreceptor(e.target.value)}
+                      style={{
+                        width: "100%",
+                        padding: "8px 10px",
+                        borderRadius: 8,
+                        border: "1px solid var(--border)",
+                        fontSize: 13,
+                        background: "#fff"
+                      }}
+                    >
+                      <option value="todas">Todas as unidades</option>
+                      {unidadesUnicasPreceptores.map(u => (
+                        <option key={u} value={u}>{u}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, fontSize: 12, color: "var(--text-muted)" }}>
+                <span>{preceptoresFiltrados.length} preceptor(es) encontrado(s)</span>
+                {form.preceptor_id && (
+                  <button
+                    type="button"
+                    onClick={() => { handleChange('preceptor_id', ''); setModalPreceptorAberto(false); }}
+                    style={{ border: 0, background: "transparent", color: "var(--danger)", cursor: "pointer", fontWeight: 600, fontSize: 12 }}
+                  >
+                    Remover exceção (regra geral)
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Lista de Preceptores com scroll */}
+            <div style={{ padding: "12px 20px", overflowY: "auto", flex: 1, maxHeight: "50vh", display: "flex", flexDirection: "column", gap: 8 }}>
+              {/* Opção Regra Geral */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  border: !form.preceptor_id ? "2px solid var(--gold-500)" : "1px dashed var(--border)",
+                  background: !form.preceptor_id ? "#fffdf5" : "#fff",
+                  cursor: "pointer",
+                  transition: "all 0.15s"
+                }}
+                onClick={() => { handleChange('preceptor_id', ''); setModalPreceptorAberto(false); }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: "50%", background: "var(--navy-900)", color: "#fff", display: "grid", placeItems: "center", flexShrink: 0 }}>
+                    <Users size={16} />
+                  </div>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <b style={{ color: "var(--navy-900)", fontSize: 13.5 }}>Todos os preceptores (Regra Geral)</b>
+                      {!form.preceptor_id && (
+                        <span className="ficha-tag" style={{ background: "var(--gold-400)", color: "var(--navy-950)", fontWeight: 700 }}>
+                          Selecionado atualmente
+                        </span>
+                      )}
+                    </div>
+                    <small style={{ color: "var(--text-muted)", fontSize: 11 }}>
+                      A regra se aplica a todos os preceptores do Internato sem exceção individual.
+                    </small>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className={!form.preceptor_id ? "btn" : "btn secondary"}
+                  style={{ padding: "6px 14px", fontSize: 12, minHeight: 32 }}
+                  onClick={e => { e.stopPropagation(); handleChange('preceptor_id', ''); setModalPreceptorAberto(false); }}
+                >
+                  {!form.preceptor_id ? "Selecionado" : "Selecionar"}
+                </button>
+              </div>
+
+              {/* Preceptores listados */}
+              {preceptoresFiltrados.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "32px 16px", color: "var(--text-muted)" }}>
+                  <UserRound size={28} style={{ opacity: 0.4, marginBottom: 8 }} />
+                  <p style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>Nenhum preceptor encontrado</p>
+                  <small style={{ fontSize: 11 }}>Tente outros termos de busca ou limpe o filtro de unidade.</small>
+                </div>
+              ) : (
+                preceptoresFiltrados.map(p => {
+                  const isSelected = form.preceptor_id === p.id;
+                  return (
+                    <div
+                      key={p.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "10px 14px",
+                        borderRadius: 10,
+                        border: isSelected ? "2px solid var(--gold-500)" : "1px solid var(--border)",
+                        background: isSelected ? "#fffdf5" : "#fff",
+                        cursor: "pointer",
+                        transition: "all 0.15s"
+                      }}
+                      onClick={() => { handleChange('preceptor_id', p.id); setModalPreceptorAberto(false); }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                        <div
+                          style={{
+                            width: 34,
+                            height: 34,
+                            borderRadius: "50%",
+                            background: isSelected ? "linear-gradient(135deg, var(--gold-400), var(--gold-600))" : "var(--surface-muted)",
+                            color: isSelected ? "#fff" : "var(--navy-800)",
+                            display: "grid",
+                            placeItems: "center",
+                            flexShrink: 0,
+                            fontWeight: 700,
+                            fontSize: 12
+                          }}
+                        >
+                          {isSelected ? "★" : (p.nome_completo || "P").charAt(0).toUpperCase()}
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <b style={{ color: "var(--navy-900)", fontSize: 13.5 }}>{p.nome_completo}</b>
+                            {isSelected && (
+                              <span className="ficha-tag" style={{ background: "var(--gold-400)", color: "var(--navy-950)", fontWeight: 700 }}>
+                                Exceção Selecionada
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ display: "flex", gap: 12, marginTop: 2, fontSize: 11.5, color: "var(--text-muted)", flexWrap: "wrap" }}>
+                            {p.cpf && <span>CPF: {formatCpf(p.cpf)}</span>}
+                            {p.email && <span>{p.email}</span>}
+                            {p.unidades && <span style={{ color: "var(--navy-700)", fontWeight: 600 }}>Unidade: {p.unidades}</span>}
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        className={isSelected ? "btn" : "btn secondary"}
+                        style={{ padding: "6px 14px", fontSize: 12, minHeight: 32, flexShrink: 0, marginLeft: 10 }}
+                        onClick={e => { e.stopPropagation(); handleChange('preceptor_id', p.id); setModalPreceptorAberto(false); }}
+                      >
+                        {isSelected ? "Selecionado" : "Selecionar"}
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Rodapé do modal */}
+            <footer style={{ padding: "12px 20px", background: "var(--surface-soft)", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "flex-end" }}>
+              <button type="button" className="btn secondary" onClick={() => setModalPreceptorAberto(false)}>
+                Fechar
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
     </>
   );
 }
@@ -8855,9 +10489,9 @@ function RegraFinanceiraDetailModal({ row, onClose, onEdit }) {
     <div className="details">
       <div className="grid">
         <div className="detail"><small>Nome da regra</small><b>{row.nome}</b></div>
-        <div className="detail"><small>Modalidade</small><b>{row.tipo_atuacao === "adm" ? "Prática" : "Internato"}</b></div>
+        <div className="detail"><small>Modalidade</small><b>Internato</b></div>
         <div className="detail"><small>Unidade</small><b>{row.unidade?.nome || "(Todas)"}</b></div>
-        {row.tipo_atuacao === "internato" && <div className="detail"><small>Internato</small><b>{row.internato?.nome || "(Todos)"}</b></div>}
+        <div className="detail"><small>Internato</small><b>{row.internato?.nome || "(Todos)"}</b></div>
         <div className="detail"><small>Disciplina</small><b>{row.disciplina?.nome || "(Todas)"}</b></div>
         <div className="detail"><small>Local</small><b>{row.local?.nome || "(Todos)"}</b></div>
         <div className="detail"><small>Setor</small><b>{row.setor?.nome || "(Todos)"}</b></div>

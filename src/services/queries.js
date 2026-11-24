@@ -279,6 +279,15 @@ function normalizeCnpj(v) {
   return raw.length === 14 ? raw : null;
 }
 
+// ── Dados bancários do vínculo (Agência e Conta) ──
+// Opcionais, texto livre (números, hífen e demais caracteres de conta
+// bancária), sem validação matemática de dígito. Remove espaços
+// desnecessários antes de salvar; valor vazio grava NULL.
+export function normalizarDadoBancario(valor) {
+  const s = String(valor == null ? '' : valor).replace(/\s+/g, ' ').trim();
+  return s === '' ? null : s;
+}
+
 export async function insertPreceptor(dados) {
   const { data, error } = await supabase.from('preceptores').insert({
     nome_completo: dados.nome_completo,
@@ -418,6 +427,43 @@ export function mensagemErroDestinatariosEmail(destinatario) {
   return 'Não foi possível montar os destinatários do e-mail. Verifique o cadastro do preceptor e tente novamente.';
 }
 
+// ── Dados bancários no e-mail final (ADICIONAR-DADOS-BANCARIOS-AO-VINCULO) ──
+// Consulta os dados atuais de cada vínculo incluído (montados por
+// montarDadosDemonstrativoFinanceiro) e decide a exibição:
+//   - nenhum vínculo com Agência/Conta preenchida → nada é exibido;
+//   - todos os vínculos com os MESMOS dados → bloco único "DADOS BANCÁRIOS";
+//   - dados diferentes (ou parcialmente preenchidos) → dentro do bloco de
+//     cada atuação, exibindo somente as linhas preenchidas.
+// Nunca exibe título, linha vazia, hífen, null ou undefined.
+export function montarDadosBancariosEmail(atuacoes) {
+  const itens = (atuacoes || []).map(at => {
+    const db = at?.dados_bancarios || {};
+    const agencia = normalizarDadoBancario(db.agencia);
+    const conta = normalizarDadoBancario(db.conta);
+    return { calculo_id: at?.calculo_id ?? null, agencia, conta };
+  });
+  const comDados = itens.filter(i => i.agencia || i.conta);
+  const linhasDe = (i) => {
+    const linhas = [];
+    if (i.agencia) linhas.push(`Agência: ${i.agencia}`);
+    if (i.conta) linhas.push(`Conta: ${i.conta}`);
+    return linhas;
+  };
+  if (comDados.length === 0) {
+    return { modo: 'nenhum', linhasUnico: [], linhasPorCalculo: {} };
+  }
+  const todosComDados = comDados.length === itens.length;
+  const chaves = new Set(comDados.map(i => `${i.agencia || ''}|${i.conta || ''}`));
+  if (todosComDados && chaves.size === 1) {
+    return { modo: 'unico', linhasUnico: linhasDe(comDados[0]), linhasPorCalculo: {} };
+  }
+  const linhasPorCalculo = {};
+  itens.forEach(i => {
+    if (i.agencia || i.conta) linhasPorCalculo[i.calculo_id] = linhasDe(i);
+  });
+  return { modo: 'por_vinculo', linhasUnico: [], linhasPorCalculo };
+}
+
 function mensagemErroEmailsCopia(error) {
   const msg = String((error && error.message) || '');
   const bruto = `${msg} ${String((error && error.details) || '')}`;
@@ -544,6 +590,8 @@ export async function insertVinculoPratica(dados) {
     data_inicio: dados.data_inicio || null,
     data_fim: dados.data_inicio ? (dados.data_fim || null) : null,
     valor_inicial: dados.valor_inicial ?? null,
+    agencia: normalizarDadoBancario(dados.agencia),
+    conta: normalizarDadoBancario(dados.conta),
     status: 'ativo'
   }).select().single();
   if (error) throw error;
@@ -565,6 +613,8 @@ export async function insertVinculoInternato(dados) {
     cnpj: normalizeCnpj(dados.cnpj),
     razao_social: dados.razao_social || null,
     valor_inicial: dados.valor_inicial ?? null,
+    agencia: normalizarDadoBancario(dados.agencia),
+    conta: normalizarDadoBancario(dados.conta),
     status: 'ativo'
   }).select().single();
   if (error) throw error;
@@ -652,7 +702,9 @@ export async function updateVinculoPratica(id, dados) {
     setor_id: dados.setor_id || null,
     data_inicio: dados.data_inicio || null,
     data_fim: dados.data_inicio ? (dados.data_fim || null) : null,
-    valor_inicial: dados.valor_inicial ?? null
+    valor_inicial: dados.valor_inicial ?? null,
+    agencia: normalizarDadoBancario(dados.agencia),
+    conta: normalizarDadoBancario(dados.conta)
   }).eq('id', id).select().single();
   if (error) throw error;
   return data;
@@ -672,6 +724,8 @@ export async function updateVinculoInternato(id, dados) {
     cnpj: normalizeCnpj(dados.cnpj),
     razao_social: dados.razao_social || null,
     valor_inicial: dados.valor_inicial ?? null,
+    agencia: normalizarDadoBancario(dados.agencia),
+    conta: normalizarDadoBancario(dados.conta),
     status: dados.status || 'ativo'
   }).eq('id', id).select().single();
   if (error) throw error;
@@ -1860,9 +1914,11 @@ export async function redefinirAcessoUsuario(profileId) {
   return data;
 }
 
-export async function redefinirAcessoViaEdge(profileId) {
+export async function restaurarAcessoUsuarioViaEdge(params) {
+  const profileId = typeof params === 'object' ? (params?.profileId || params?.profile_id) : params;
+  const solicitacaoId = typeof params === 'object' ? (params?.solicitacaoId || params?.solicitacao_id || null) : null;
   const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error('Sessao invalida. Faca login novamente.');
+  if (!session) throw new Error('Sessão inválida. Faça login novamente.');
   let res;
   try {
     res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-reset-access`, {
@@ -1872,19 +1928,66 @@ export async function redefinirAcessoViaEdge(profileId) {
         'Authorization': `Bearer ${session.access_token}`,
         'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
       },
-      body: JSON.stringify({ profile_id: profileId }),
+      body: JSON.stringify({ profile_id: profileId, solicitacao_id: solicitacaoId }),
     });
   } catch (fetchErr) {
-    throw new Error('Falha ao conectar com o servidor. Verifique sua conexao e tente novamente.');
+    throw new Error('Falha ao conectar com o servidor. Verifique sua conexão e tente novamente.');
   }
   let json;
   try {
     json = await res.json();
   } catch (parseErr) {
-    throw new Error('Resposta invalida do servidor (status ' + res.status + ')');
+    throw new Error('Resposta inválida do servidor (status ' + res.status + ')');
   }
-  if (!res.ok) throw new Error(json.error || json.msg || 'Erro ao redefinir acesso (status ' + res.status + ')');
+  if (!res.ok) throw new Error(json.error || json.msg || 'Erro ao restaurar acesso (status ' + res.status + ')');
   return json;
+}
+
+export async function redefinirAcessoViaEdge(profileId, solicitacaoId = null) {
+  return await restaurarAcessoUsuarioViaEdge({ profileId, solicitacaoId });
+}
+
+export async function solicitarRecuperacaoAcesso(email) {
+  const { data, error } = await supabase.rpc('solicitar_recuperacao_acesso', { p_email: email });
+  if (error) throw error;
+  return data;
+}
+
+export async function obterContatoRecuperacaoAcesso() {
+  const { data, error } = await supabase.rpc('obter_contato_recuperacao_acesso');
+  if (error) throw error;
+  return data;
+}
+
+export async function salvarConfigResponsavelRecuperacao(nomeOuLista, email, ativo = true) {
+  let contatosArray = [];
+  if (Array.isArray(nomeOuLista)) {
+    contatosArray = nomeOuLista;
+  } else {
+    contatosArray = [{
+      nome_responsavel: nomeOuLista,
+      email_responsavel: email,
+      ativo: ativo ?? true
+    }];
+  }
+
+  const { data, error } = await supabase.rpc('salvar_configs_responsaveis_recuperacao', {
+    p_contatos: contatosArray,
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function listarConfigsResponsaveisRecuperacao() {
+  const { data, error } = await supabase.rpc('listar_configs_responsaveis_recuperacao');
+  if (error) throw error;
+  return data || [];
+}
+
+export async function listarSolicitacoesRecuperacaoAcesso() {
+  const { data, error } = await supabase.rpc('listar_solicitacoes_recuperacao_acesso');
+  if (error) throw error;
+  return data || [];
 }
 
 export async function marcarPrimeiroAcessoConcluido(profileId) {
@@ -2102,23 +2205,40 @@ export async function fetchPreceptoresPraticaParaRegras() {
 
 // Preceptores com vínculo Internato ativo (para o formulário de Regras Financeiras)
 export async function fetchPreceptoresInternatoParaRegras() {
-  const { data, error } = await supabase
-    .from('vinculos_internato')
-    .select('preceptor:preceptores!vinculos_internato_preceptor_id_fkey(id, nome_completo, status)')
-    .eq('status', 'ativo');
-  if (error) {
-    console.error('[fetchPreceptoresInternatoParaRegras]', error);
-    throw error;
+  const { data: precs, error: errPrecs } = await supabase
+    .from('preceptores')
+    .select('id, nome_completo, cpf, email, telefone, status, profissao:profissoes(nome)')
+    .eq('status', 'ativo')
+    .order('nome_completo', { ascending: true });
+
+  if (errPrecs) {
+    console.error('[fetchPreceptoresInternatoParaRegras - preceptores]', errPrecs);
+    throw errPrecs;
   }
-  const seen = new Set();
-  const result = [];
-  for (const v of (data || [])) {
-    if (v.preceptor && v.preceptor.status === 'ativo' && !seen.has(v.preceptor.id)) {
-      seen.add(v.preceptor.id);
-      result.push(v.preceptor);
+
+  const { data: vincs } = await supabase
+    .from('vinculos_internato')
+    .select('preceptor_id, unidade:unidades(id, nome)')
+    .eq('status', 'ativo');
+
+  const mapaUnidades = {};
+  for (const v of (vincs || [])) {
+    if (v.preceptor_id && v.unidade?.nome) {
+      if (!mapaUnidades[v.preceptor_id]) mapaUnidades[v.preceptor_id] = new Set();
+      mapaUnidades[v.preceptor_id].add(v.unidade.nome);
     }
   }
-  return result.sort((a, b) => a.nome_completo.localeCompare(b.nome_completo, 'pt-BR'));
+
+  return (precs || []).map(p => ({
+    id: p.id,
+    nome_completo: p.nome_completo,
+    cpf: p.cpf || '',
+    email: p.email || '',
+    telefone: p.telefone || '',
+    profissao_nome: p.profissao?.nome || '',
+    unidades: mapaUnidades[p.id] ? Array.from(mapaUnidades[p.id]).join(', ') : '',
+    status: p.status
+  }));
 }
 
 export async function checarConflitoRegraFinanceira(regra) {
@@ -2294,6 +2414,23 @@ export async function reativarRegraFinanceira(regra) {
   return data;
 }
 
+export async function previaExcluirRegraFinanceira(regraId) {
+  const { data, error } = await supabase.rpc('previa_excluir_regra_financeira', {
+    p_regra_id: regraId
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function excluirRegraFinanceira(regraId, { confirmar = false } = {}) {
+  const { data, error } = await supabase.rpc('excluir_regra_financeira', {
+    p_regra_id: regraId,
+    p_confirmar: confirmar
+  });
+  if (error) throw error;
+  return data;
+}
+
 export function formatInitialValueBRL(val) {
   if (val == null || val === '') return '';
   const num = typeof val === 'number' ? val : parseFloat(String(val).replace(',', '.'));
@@ -2372,21 +2509,46 @@ export async function fetchCompetencias(cursoId) {
   return data || [];
 }
 
-export async function criarCompetencia(ano, mes, cursoId) {
-  const dataInicio = `${ano}-${String(mes).padStart(2, '0')}-01`;
-  const ultimoDia = new Date(ano, mes, 0).getDate();
-  const dataFim = `${ano}-${String(mes).padStart(2, '0')}-${ultimoDia}`;
+export async function criarCompetencia(ano, mes, cursoId = null) {
+  let cId = cursoId;
+  if (!cId) {
+    const { data: curso } = await supabase.from('cursos').select('id').limit(1).maybeSingle();
+    cId = curso?.id;
+  }
+  const anoNum = Number(ano);
+  const mesNum = Number(mes);
+  const dataInicio = `${anoNum}-${String(mesNum).padStart(2, '0')}-01`;
+  const ultimoDia = new Date(anoNum, mesNum, 0).getDate();
+  const dataFim = `${anoNum}-${String(mesNum).padStart(2, '0')}-${String(ultimoDia).padStart(2, '0')}`;
   const { data, error } = await supabase.from('competencias').insert({
-    curso_id: cursoId, ano, mes, data_inicio: dataInicio, data_fim: dataFim, status: 'aberta'
-  }).select().single();
+    curso_id: cId, ano: anoNum, mes: mesNum, data_inicio: dataInicio, data_fim: dataFim, status: 'aberta'
+  }).select().maybeSingle();
   if (error) {
     if (error.code === '23505') {
-      const { data: existing } = await supabase.from('competencias').select('*').eq('curso_id', cursoId).eq('ano', ano).eq('mes', mes).single();
+      const { data: existing } = await supabase.from('competencias').select('*').eq('curso_id', cId).eq('ano', anoNum).eq('mes', mesNum).maybeSingle();
       return existing;
     }
     throw error;
   }
   return data;
+}
+
+export async function obterOuCriarCompetencia(ano, mes, cursoId = null) {
+  let cId = cursoId;
+  if (!cId) {
+    const { data: curso } = await supabase.from('cursos').select('id').limit(1).maybeSingle();
+    cId = curso?.id;
+  }
+  const anoNum = Number(ano);
+  const mesNum = Number(mes);
+
+  let q = supabase.from('competencias').select('*').eq('ano', anoNum).eq('mes', mesNum);
+  if (cId) q = q.eq('curso_id', cId);
+  const { data: existing, error: findErr } = await q.maybeSingle();
+  if (findErr) throw findErr;
+  if (existing) return existing;
+
+  return await criarCompetencia(anoNum, mesNum, cId);
 }
 
 export async function calcularCompetencia(competenciaId) {
@@ -4120,14 +4282,14 @@ export async function montarDadosDemonstrativoFinanceiro(params, paramCompetenci
     if (tipoAtuacao === 'adm' && calc.vinculo_adm_id) {
       const { data: v } = await supabase
         .from('vinculos_adm')
-        .select('periodo:periodos(numero, nome), unidade:unidades(nome), disciplina:disciplinas(nome), local:locais(nome), setor:setores(nome)')
+        .select('periodo:periodos(numero, nome), unidade:unidades(nome), disciplina:disciplinas(nome), local:locais(nome), setor:setores(nome), agencia, conta')
         .eq('id', calc.vinculo_adm_id)
         .maybeSingle();
       vinculoCtx = v;
     } else if (tipoAtuacao === 'internato' && calc.vinculo_internato_id) {
       const { data: v } = await supabase
         .from('vinculos_internato')
-        .select('periodo:periodos(numero, nome), unidade:unidades(nome), internato:internatos(nome), local:locais(nome), setor:setores(nome), cnpj, razao_social, modalidade_ref:modalidades_pagamento!vinculos_internato_modalidade_pagamento_id_fkey(nome)')
+        .select('periodo:periodos(numero, nome), unidade:unidades(nome), internato:internatos(nome), local:locais(nome), setor:setores(nome), cnpj, razao_social, agencia, conta, modalidade_ref:modalidades_pagamento!vinculos_internato_modalidade_pagamento_id_fkey(nome)')
         .eq('id', calc.vinculo_internato_id)
         .maybeSingle();
       vinculoCtx = v;
@@ -4205,6 +4367,13 @@ export async function montarDadosDemonstrativoFinanceiro(params, paramCompetenci
       cnpj: null
     };
 
+    // Dados bancários deste vínculo (Agência e Conta): opcionais, consultados
+    // no vínculo relacionado ao cálculo a cada preparação (dados atuais).
+    const dadosBancarios = {
+      agencia: normalizarDadoBancario(vinculoCtx?.agencia),
+      conta: normalizarDadoBancario(vinculoCtx?.conta)
+    };
+
     atuacoesElegiveis.push({
       calculo_id: calcId,
       tipo_atuacao: tipoAtuacao,
@@ -4220,7 +4389,8 @@ export async function montarDadosDemonstrativoFinanceiro(params, paramCompetenci
       total_turnos: presencasFormatadas.length || Number(calc.quantidade_presencas || 0),
       valor_atuacao: valorAtuacao,
       versao: calc.versao,
-      identificacao: identificacaoAtuacao
+      identificacao: identificacaoAtuacao,
+      dados_bancarios: dadosBancarios
     });
   }
 

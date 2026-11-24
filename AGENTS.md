@@ -29,3 +29,4 @@
 25. Validação de período aplicada no frontend (Form) e no banco (trigger `fn_validate_vinculo_periodo`).
 26. Ao criar préceptor, criar o vínculo na mesma operação; se o vínculo falhar, inativar o préceptor criado.
 27. Ao editar, pré-selecionar o período e vínculo existentes; se período incompatível, mostrar aviso.
+28. Antes de qualquer operação MCP Supabase, siga `docs/CONEXAO_SUPABASE_MCP.md`: confirme o `project_ref` esperado com o usuário e faça prova de leitura antes de escrever.
